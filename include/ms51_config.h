@@ -2,7 +2,32 @@
  * BL4818-Servo Hardware Configuration
  *
  * Pin assignments, clock settings, and feature toggles for the
- * BL4818 motor driver board.
+ * BL4818 motor driver board (XT48-12 V02).
+ *
+ * MCU Pin Mapping (from Nuvoton datasheet Figure 4.1-1):
+ *
+ *   Pin  Port  Key Functions
+ *   ───  ────  ──────────────────────────────────────────
+ *    1   P0.5  T0 / PWM0_CH2 / ADC_CH4
+ *    2   P0.6  UART0_TXD / ADC_CH3
+ *    3   P0.7  UART0_RXD / ADC_CH2
+ *    4   P2.0  nRESET
+ *    5   P3.0  INT0 / OSCIN / ADC_CH1
+ *    6   P1.7  INT1 / ADC_CH0
+ *    7   VSS   Ground
+ *    8   P1.6  UART1_TXD / ICE_DAT / [I2C0_SDA]
+ *    9   VDD   Power (2.4–5.5V)
+ *   10   P1.5  SPI0_SS / PWM0_CH5
+ *   11   P1.4  PWM0_BRAKE / PWM0_CH1 / I2C0_SDA
+ *   12   P1.3  I2C0_SCL / [STADC]
+ *   13   P1.2  PWM0_CH0 / IC0
+ *   14   P1.1  ADC_CH7 / PWM0_CH1 / IC1 / CLKO
+ *   15   P1.0  PWM0_CH2 / IC2 / SPI0_CLK
+ *   16   P0.0  PWM0_CH3 / IC3 / SPI0_MOSI / T1
+ *   17   P0.1  PWM0_CH4 / IC4 / SPI0_MISO
+ *   18   P0.2  ICE_CLK / UART1_RXD / [I2C0_SCL]
+ *   19   P0.3  ADC_CH6 / PWM0_CH5 / IC5
+ *   20   P0.4  ADC_CH5 / PWM0_CH3 / IC3 / STADC
  */
 #ifndef MS51_CONFIG_H
 #define MS51_CONFIG_H
@@ -32,51 +57,86 @@
  *   Both high and low sides are active-high from the MCU's perspective.
  *
  * Pin assignments are PROVISIONAL — update after multimeter probing.
- * Gate pins are expected on pins 7-11 (P1.3-P1.7) and pin 1 (P0.5).
+ * PWM-capable pins on right side of IC (pins 10-17) are prime candidates.
+ * 6 gate signals needed: 3× high-side + 3× low-side.
+ *
+ * Best guess based on PWM channel availability:
+ *   Phase U: CH0 (P1.2, pin 13) + CH1 (P1.1, pin 14)
+ *   Phase V: CH2 (P1.0, pin 15) + CH3 (P0.0, pin 16)
+ *   Phase W: CH4 (P0.1, pin 17) + CH5 (P1.5, pin 10)
+ *
+ * But could be any permutation — VERIFY WITH MULTIMETER.
  */
-#define PHASE_A_HI_PIN  P17     /* P1.7 - PWM CH0 — VERIFY */
-#define PHASE_A_LO_PIN  P16     /* P1.6 - PWM CH1 — VERIFY */
-#define PHASE_B_HI_PIN  P15     /* P1.5 - PWM CH2 — VERIFY */
-#define PHASE_B_LO_PIN  P14     /* P1.4 - PWM CH3 — VERIFY */
-#define PHASE_C_HI_PIN  P13     /* P1.3 - PWM CH4 — VERIFY */
-#define PHASE_C_LO_PIN  P05     /* P0.5 - PWM CH5 — VERIFY */
+#define PHASE_U_HI_PIN  P12     /* P1.2 pin 13 - PWM0_CH0 — VERIFY */
+#define PHASE_U_LO_PIN  P11     /* P1.1 pin 14 - PWM0_CH1 — VERIFY */
+#define PHASE_V_HI_PIN  P10     /* P1.0 pin 15 - PWM0_CH2 — VERIFY */
+#define PHASE_V_LO_PIN  P00     /* P0.0 pin 16 - PWM0_CH3 — VERIFY */
+#define PHASE_W_HI_PIN  P01     /* P0.1 pin 17 - PWM0_CH4 — VERIFY */
+#define PHASE_W_LO_PIN  P15     /* P1.5 pin 10 - PWM0_CH5 — VERIFY */
 
-/* Hall sensor inputs */
-#define HALL_A_PIN      P12     /* P1.2 */
-#define HALL_B_PIN      P11     /* P1.1 */
-#define HALL_C_PIN      P10     /* P1.0 */
+/* Aliases used by pwm.c (maps A/B/C to U/V/W) */
+#define PHASE_A_HI_PIN  PHASE_U_HI_PIN
+#define PHASE_A_LO_PIN  PHASE_U_LO_PIN
+#define PHASE_B_HI_PIN  PHASE_V_HI_PIN
+#define PHASE_B_LO_PIN  PHASE_V_LO_PIN
+#define PHASE_C_HI_PIN  PHASE_W_HI_PIN
+#define PHASE_C_LO_PIN  PHASE_W_LO_PIN
 
-/* Hall sensor port and mask */
-#define HALL_PORT       P1
-#define HALL_MASK       0x07    /* P1.0, P1.1, P1.2 */
-#define HALL_SHIFT      0       /* Bits 0-2 of P1 */
+/* Hardware fault brake pin (directly supported by PWM0 module) */
+#define BRAKE_PIN       P14     /* P1.4 pin 11 - PWM0_BRAKE */
 
-/* ADC channels */
-#define ADC_CH_CURRENT  6       /* P0.6 - current shunt */
-#define ADC_CH_VOLTAGE  7       /* P0.7 - battery voltage divider */
+/*
+ * Hall sensor inputs — VERIFY pin assignments.
+ * These need to be on GPIO pins with interrupt capability.
+ * Candidates for non-PWM pins: P1.7 (pin 6), P3.0 (pin 5), P1.3 (pin 12),
+ * P0.5 (pin 1), P0.3 (pin 19), P0.4 (pin 20).
+ *
+ * P1.7 has INT1, P3.0 has INT0 — good for edge-triggered hall ISR.
+ */
+#define HALL_A_PIN      P05     /* P0.5 pin 1  — VERIFY */
+#define HALL_B_PIN      P17     /* P1.7 pin 6  — VERIFY */
+#define HALL_C_PIN      P30     /* P3.0 pin 5  — VERIFY */
 
-/* Control inputs */
-#define DIR_PIN         P00     /* P0.0 - direction input */
-#define PWM_IN_PIN      P01     /* P0.1 - PWM speed input */
-#define ENABLE_PIN      P03     /* P0.3 - enable/brake input */
-#define LED_PIN         P04     /* P0.4 - status LED */
+/* Hall sensor reading — must update if pins aren't on same port */
+/* If halls are on different ports, we read them individually */
+#define HALL_READ_INDIVIDUAL  1  /* Set to 1 if halls are on different ports */
 
-/* Encoder inputs (optional add-on) */
-#define ENC_A_PIN       P3      /* P3.0 - encoder channel A */
-#define ENC_B_PIN       P01     /* P0.1 - encoder channel B (replaces PWM in) */
+/*
+ * ADC channels (from datasheet):
+ *   CH0 = P1.7 (pin 6)    CH4 = P0.5 (pin 1)
+ *   CH1 = P3.0 (pin 5)    CH5 = P0.4 (pin 20)
+ *   CH2 = P0.7 (pin 3)    CH6 = P0.3 (pin 19)
+ *   CH3 = P0.6 (pin 2)    CH7 = P1.1 (pin 14)
+ *
+ * Current shunt ADC pin — VERIFY which channel is used.
+ * UART0_TX (P0.6) = ADC_CH3, UART0_RX (P0.7) = ADC_CH2.
+ * If UART is on P0.6/P0.7, current sense must be elsewhere.
+ */
+#define ADC_CH_CURRENT  6       /* ADC_CH6 = P0.3 (pin 19) — VERIFY */
+#define ADC_CH_VOLTAGE  5       /* ADC_CH5 = P0.4 (pin 20) — VERIFY */
 
-/* UART pins */
-#define UART_TX_PIN     P06     /* P0.6 - shared with ADC */
-#define UART_RX_PIN     P07     /* P0.7 - shared with ADC */
+/* Control inputs — VERIFY */
+#define LED_PIN         P04     /* P0.4 pin 20 — VERIFY (or may be ADC) */
+
+/* UART pins (directly from datasheet) */
+#define UART_TX_PIN     P06     /* P0.6 pin 2  - UART0_TXD */
+#define UART_RX_PIN     P07     /* P0.7 pin 3  - UART0_RXD */
+
+/* Programming header (from board silkscreen: P,R,S,+,-) */
+/* P = ICE_DAT = P1.6 (pin 8)  */
+/* S = ICE_CLK = P0.2 (pin 18) */
+/* R = nRESET  = P2.0 (pin 4)  */
+/* + = VDD     = pin 9          */
+/* - = VSS     = pin 7          */
 
 /* ── Motor Parameters ────────────────────────────────────────────────────── */
 #define MOTOR_POLE_PAIRS    7       /* BL4818 = 14 poles / 7 pole pairs */
 #define HALL_STATES_PER_REV (6 * MOTOR_POLE_PAIRS)  /* 42 states/mech rev */
 
 /* ── Current Sensing ─────────────────────────────────────────────────────── */
-#define SHUNT_RESISTANCE_MOHM   50      /* 50 milliohm shunt */
-#define CURRENT_AMP_GAIN        10      /* Op-amp gain on shunt voltage */
-#define ADC_VREF_MV             3300    /* ADC reference = VDD = 3.3V */
+#define SHUNT_RESISTANCE_MOHM   50      /* 50 milliohm shunt — VERIFY */
+#define CURRENT_AMP_GAIN        10      /* Op-amp gain — VERIFY (may be direct) */
+#define ADC_VREF_MV             3300    /* ADC reference = VDD — VERIFY 3.3V or 5V */
 #define ADC_RESOLUTION          4096    /* 12-bit ADC */
 #define CURRENT_LIMIT_MA        5000    /* 5A overcurrent threshold */
 #define CURRENT_WARN_MA         3000    /* Soft current limit for regulation */
@@ -89,6 +149,8 @@
  *       = ADC_val * 3300 / (4096 * 10 * 0.050)
  *       = ADC_val * 3300 / 2048
  *       = ADC_val * 825 / 512
+ *
+ * NOTE: Recalculate after confirming GAIN, R_shunt, and VDD voltage.
  */
 #define ADC_TO_MA_NUM       825
 #define ADC_TO_MA_DEN       512

@@ -182,6 +182,9 @@ __sbit __at(0x92) P12;
 __sbit __at(0x91) P11;
 __sbit __at(0x90) P10;
 
+/* P3 bits */
+__sbit __at(0xF0) P30;
+
 /* ── PWM Extended Registers (accessed via SFR pages) ─────────────────────── */
 /* These are accessed by setting SFRS page and using timed-access where needed */
 
