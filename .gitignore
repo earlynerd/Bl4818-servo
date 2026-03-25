@@ -1,0 +1,17 @@
+build/
+*.rel
+*.lst
+*.sym
+*.asm
+*.rst
+*.mem
+*.map
+*.lk
+*.ihx
+*.hex
+*.bin
+*.o
+*.bak
+*~
+.vscode/
+.idea/
