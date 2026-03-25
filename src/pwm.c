@@ -97,34 +97,22 @@ void pwm_init(void)
  */
 
 /*
- * Phase output helpers.
+ * Phase output control.
  *
- * The high-side gate drive uses a small external N-FET as inverter.
- * If PHASE_HI_INVERTED is set, MCU LOW = high-side ON, MCU HIGH = OFF.
- * We abstract this so the rest of the code uses logical on/off.
+ * All gate drives are active-high from the MCU:
+ *   Low-side (N-ch):  MCU HIGH = on (direct gate drive through resistor)
+ *   High-side (P-ch): MCU HIGH = on (small N-FET pulls P-ch gate low)
  */
-#if PHASE_HI_INVERTED
-  #define HI_ON  0   /* MCU low → N-FET off → high-side gate pulled up → ON */
-  #define HI_OFF 1   /* MCU high → N-FET on → high-side gate pulled low → OFF */
-#else
-  #define HI_ON  1
-  #define HI_OFF 0
-#endif
-
-/* LO_ON/LO_OFF: low-side is always direct drive (active high) */
-#define LO_ON  1
-#define LO_OFF 0
-
 static void phase_all_off(void)
 {
     /* All high-sides off first (prevent shoot-through) */
-    PHASE_A_HI_PIN = HI_OFF;
-    PHASE_B_HI_PIN = HI_OFF;
-    PHASE_C_HI_PIN = HI_OFF;
+    PHASE_A_HI_PIN = 0;
+    PHASE_B_HI_PIN = 0;
+    PHASE_C_HI_PIN = 0;
     /* Then low-sides off */
-    PHASE_A_LO_PIN = LO_OFF;
-    PHASE_B_LO_PIN = LO_OFF;
-    PHASE_C_LO_PIN = LO_OFF;
+    PHASE_A_LO_PIN = 0;
+    PHASE_B_LO_PIN = 0;
+    PHASE_C_LO_PIN = 0;
 }
 
 void pwm_set_duty(uint16_t duty)
@@ -228,31 +216,31 @@ void pwm_timer0_isr(void) __interrupt(INT_TIMER0)
     if (pwm_counter < threshold && active_pattern != 0) {
         /* PWM ON phase — apply pattern */
         /* Turn off all high-sides first (dead-time) */
-        PHASE_A_HI_PIN = HI_OFF;
-        PHASE_B_HI_PIN = HI_OFF;
-        PHASE_C_HI_PIN = HI_OFF;
+        PHASE_A_HI_PIN = 0;
+        PHASE_B_HI_PIN = 0;
+        PHASE_C_HI_PIN = 0;
 
         /* Apply low-sides (always on for active low-side phase) */
-        PHASE_A_LO_PIN = (active_pattern & 0x01) ? LO_ON : LO_OFF;
-        PHASE_B_LO_PIN = (active_pattern & 0x04) ? LO_ON : LO_OFF;
-        PHASE_C_LO_PIN = (active_pattern & 0x10) ? LO_ON : LO_OFF;
+        PHASE_A_LO_PIN = (active_pattern & 0x01) ? 1 : 0;
+        PHASE_B_LO_PIN = (active_pattern & 0x04) ? 1 : 0;
+        PHASE_C_LO_PIN = (active_pattern & 0x10) ? 1 : 0;
 
         /* Brief dead-time (a few NOPs at 24MHz ≈ ~100ns) */
         __asm__("nop\nnop\nnop\nnop");
 
         /* Apply high-sides (PWM-modulated) */
-        PHASE_A_HI_PIN = (active_pattern & 0x02) ? HI_ON : HI_OFF;
-        PHASE_B_HI_PIN = (active_pattern & 0x08) ? HI_ON : HI_OFF;
-        PHASE_C_HI_PIN = (active_pattern & 0x20) ? HI_ON : HI_OFF;
+        PHASE_A_HI_PIN = (active_pattern & 0x02) ? 1 : 0;
+        PHASE_B_HI_PIN = (active_pattern & 0x08) ? 1 : 0;
+        PHASE_C_HI_PIN = (active_pattern & 0x20) ? 1 : 0;
     } else {
         /* PWM OFF phase — high-sides off, keep low-sides for freewheeling */
-        PHASE_A_HI_PIN = HI_OFF;
-        PHASE_B_HI_PIN = HI_OFF;
-        PHASE_C_HI_PIN = HI_OFF;
+        PHASE_A_HI_PIN = 0;
+        PHASE_B_HI_PIN = 0;
+        PHASE_C_HI_PIN = 0;
 
         /* In off-phase, keep active low-side ON for current recirculation */
-        PHASE_A_LO_PIN = (active_pattern & 0x01) ? LO_ON : LO_OFF;
-        PHASE_B_LO_PIN = (active_pattern & 0x04) ? LO_ON : LO_OFF;
-        PHASE_C_LO_PIN = (active_pattern & 0x10) ? LO_ON : LO_OFF;
+        PHASE_A_LO_PIN = (active_pattern & 0x01) ? 1 : 0;
+        PHASE_B_LO_PIN = (active_pattern & 0x04) ? 1 : 0;
+        PHASE_C_LO_PIN = (active_pattern & 0x10) ? 1 : 0;
     }
 }

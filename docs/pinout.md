@@ -48,47 +48,56 @@ Fill in the "Board Connection" column as you trace each pin.
 
 ## Gate Drive Topology
 
-Based on visual inspection:
+Complementary half-bridge per phase: **P-channel high-side + N-channel low-side**
+in a single 4-pin + tab package. All outputs are **active-high** from the MCU.
 
 ```
                     VCC_MOTOR
                        │
                   ┌────┴────┐
                   │ High-side│
-                  │  P-ch?   │◄── Tab = phase output (U/V/W)
-                  │  N-ch?   │
-                  └────┬────┘
+                  │  P-ch    │──── Gate ◄── pulled up to VCC_MOTOR via resistor
+                  └────┬────┘                    │
+                       │                    ┌────┴────┐
+                       │                    │ Small   │
+                       │                    │ N-FET   │──── Gate ◄── MCU pin ──[R]──
+                       │                    └────┬────┘
+                       │                         │
+                       │                        GND
                        │
-     MCU pin ──[R]──┤  Q_HS (small N-FET level shifter)
-                    │  (inverts MCU signal to drive high-side gate)
-                    ├──[R_pulldown]── GND
-                    │
-                       ├─────────── Phase output (U / V / W)
+                       ├─────────── Phase output (U / V / W) = package tab
                        │
                   ┌────┴────┐
                   │ Low-side │
-                  │  N-ch    │
-                  └────┬────┘
-                       │
-     MCU pin ──[R_gate]──┤ Gate
-                         ├──[R_pulldown]── GND
-                         │
-                      GND (via shunt)
+                  │  N-ch    │──── Gate ◄── MCU pin ──[R_gate]──
+                  └────┬────┘                │
+                       │              [R_pulldown]
+                       │                     │
+                    GND (via shunt)          GND
 ```
+
+**How it works (all active-high from MCU):**
+- **Low-side ON:** MCU pin HIGH → gate resistor → N-ch gate HIGH → N-ch conducts
+- **High-side ON:** MCU pin HIGH → small N-FET gate HIGH → N-FET conducts →
+  pulls P-ch gate to GND → P-ch conducts (P-FET turns on with low gate)
+- **Both OFF:** MCU pin LOW → low-side N-ch off; small N-FET off →
+  P-ch gate pulled up to VCC by resistor → P-ch off
+
+No inversion from the MCU's perspective.
 
 ### Confirm by probing:
 
-- [ ] What package are the 3 main MOSFETs? (e.g., SO-8 dual, SOT-23-6?)
-- [ ] Are they complementary pairs (N+P in one package) or dual N-channel?
-- [ ] If dual N-ch: the small external N-FET inverts the MCU signal for the high-side (bootstrap-less charge-pump-less gate drive — high-side gate is pulled up by a resistor to VCC, and the small N-FET pulls it low to turn it ON or OFF?)
-- [ ] If complementary N+P: MCU drives both gates together through resistor
+- [ ] What package are the 3 complementary MOSFET pairs? (4-pin + tab)
+- [ ] Can you read the part marking? _______________
+- [ ] Confirm P-ch high-side / N-ch low-side by checking tab to VCC vs GND
+- [ ] Confirm small N-FETs (likely SOT-23) — one per phase near the main FET
 
 ### Package identification help
 
-Common 4-pin + tab SMT MOSFET packages for this application:
-- **SO-8 (half-bridge):** e.g., AO4606 (N+P complementary pair, 30V)
-- **SOT-23-6 (dual):** e.g., Si1902DL
-- **PMPAK / PDFN-8:** various dual MOSFETs
+Common complementary MOSFET packages (N+P pair, 4-pin + tab):
+- **SO-8:** e.g., AO4606 (N+P, 30V), AO4616 (N+P, 30V)
+- **SOP-8 / TSSOP-8:** various Chinese dual complementary parts
+- **DFN / PDFN:** compact dual complementary
 
 > Note the part marking on the MOSFET package if readable: _______________
 

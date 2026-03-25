@@ -19,17 +19,17 @@
 /* ── Pin Assignments ─────────────────────────────────────────────────────── */
 
 /*
- * Three-phase bridge gate drive outputs.
+ * Three-phase bridge gate drive outputs — ALL ACTIVE HIGH.
  *
- * Gate drive topology (from board inspection):
- *   Low-side:  MCU pin ──[R_gate]──> N-FET gate, with pulldown to GND.
- *              Active HIGH = low-side FET on.
- *   High-side: MCU pin ──[R]──> small N-FET gate (level shifter/inverter).
- *              The small N-FET pulls the high-side gate low (or drives it).
- *              Polarity TBD — may be ACTIVE LOW at MCU pin (inverted by N-FET).
+ * Gate drive topology (confirmed by inspection):
+ *   Each phase uses a complementary MOSFET pair (P-ch high / N-ch low)
+ *   in a single 4-pin + tab package. Tab = phase output (U/V/W).
  *
- * TODO: Confirm polarity after probing. If high-side is inverted,
- *       set PHASE_x_HI_INVERT to 1 and the PWM driver will invert.
+ *   Low-side (N-ch):  MCU HIGH → gate resistor → FET on.
+ *   High-side (P-ch): MCU HIGH → small N-FET on → pulls P-ch gate low → FET on.
+ *                     MCU LOW  → small N-FET off → gate pulled up to VCC → FET off.
+ *
+ *   Both high and low sides are active-high from the MCU's perspective.
  *
  * Pin assignments are PROVISIONAL — update after multimeter probing.
  * Gate pins are expected on pins 7-11 (P1.3-P1.7) and pin 1 (P0.5).
@@ -40,9 +40,6 @@
 #define PHASE_B_LO_PIN  P14     /* P1.4 - PWM CH3 — VERIFY */
 #define PHASE_C_HI_PIN  P13     /* P1.3 - PWM CH4 — VERIFY */
 #define PHASE_C_LO_PIN  P05     /* P0.5 - PWM CH5 — VERIFY */
-
-/* Set to 1 if high-side MCU output is inverted by external N-FET driver */
-#define PHASE_HI_INVERTED  0    /* TODO: determine after probing */
 
 /* Hall sensor inputs */
 #define HALL_A_PIN      P12     /* P1.2 */
