@@ -49,6 +49,7 @@ CMD_GET_UID           = 0xB2
 CMD_GET_CID           = 0xB3
 CMD_GET_PID           = 0xEB
 CMD_ISP_PAGE_ERASE    = 0xD5
+CMD_ISP_MASS_ERASE    = 0xD6
 CMD_FORMAT2_CONTINUATION = 0x00
 
 # Firmware version thresholds
@@ -92,6 +93,15 @@ def progress_bar(label, current, total, width=40):
     bar = "#" * filled + "-" * (width - filled)
     print(f"\r  {label}: [{bar}] {int(pct * 100):3d}%", end="", flush=True)
 
+def decode_ldrom_size_kb(config_bytes):
+    if len(config_bytes) < 2:
+        return 0
+    lds = config_bytes[1] & 0x07
+    return {7: 0, 6: 1, 5: 2, 4: 3, 3: 4, 2: 4, 1: 4, 0: 4}.get(lds, 0)
+
+def decode_aprom_size_bytes(config_bytes):
+    return MS51FB9AE_FLASH_SIZE - (decode_ldrom_size_kb(config_bytes) * 1024)
+
 # ── ISP Programmer ──────────────────────────────────────────────────────────
 
 class ISPError(Exception):
@@ -109,14 +119,15 @@ class ISPProgrammer:
         self.ser = serial.Serial(self.port, self.baudrate, timeout=0.1)
         self.ser.flush()
 
-    def close(self):
+    def close(self, run_aprom=True):
         if self.ser and self.ser.is_open:
-            try:
-                self._send_raw(self._build_packet(CMD_RUN_APROM))
-                self.seq_num += 1
-            except Exception:
-                pass
-            time.sleep(RESET_TIMEOUT)
+            if run_aprom:
+                try:
+                    self._send_raw(self._build_packet(CMD_RUN_APROM))
+                    self.seq_num += 1
+                except Exception:
+                    pass
+                time.sleep(RESET_TIMEOUT)
             self.ser.close()
 
     def _build_packet(self, cmd, data=b""):
@@ -156,6 +167,7 @@ class ISPProgrammer:
             timeout = 0.2
         self.seq_num += 1
         pkt = self._build_packet(cmd, data)
+        expected_rx_seq = self.seq_num + 1
         self._send_raw(pkt)
 
         for attempt in range(5):
@@ -163,9 +175,10 @@ class ISPProgrammer:
             if rx and len(rx) == PACKSIZE:
                 # Verify checksum: rx[0:2] should equal sum of our sent packet
                 rx_checksum = unpack_u16(rx[0:2])
+                rx_seq = unpack_u32(rx[4:8])
                 tx_checksum = calc_checksum(pkt)
-                if rx_checksum == tx_checksum:
-                    self.seq_num += 1
+                if rx_checksum == tx_checksum and rx_seq == expected_rx_seq:
+                    self.seq_num = expected_rx_seq
                     return rx
             # Retry
             self.ser.flush()
@@ -360,11 +373,10 @@ class ISPProgrammer:
 
     def write_config(self, config_bytes):
         """Write config bytes to device."""
-        # CMD_UPDATE_CONFIG sends 5 config bytes starting at data offset 8
-        # The protocol packs them as: [start_addr:4][total_len:4][config0..4]
-        pkt_data = pack_u32(0) + pack_u32(len(config_bytes))
-        for b in config_bytes:
-            pkt_data += bytes([b, 0x00, 0x00, 0x00])  # each config byte is 32-bit word
+        if len(config_bytes) != 5:
+            raise ISPError("Config write requires exactly 5 raw config bytes")
+        # The Pico bridge expects the raw config bytes at packet offset 8.
+        pkt_data = bytes(config_bytes)
         rx = self.send_cmd(CMD_UPDATE_CONFIG, pkt_data, timeout=ERASE_TIMEOUT)
         return rx
 
@@ -447,10 +459,19 @@ class ISPProgrammer:
         return data
 
     def erase_all(self):
-        """Mass erase: erases all flash and resets config to defaults."""
-        print("  Sending ERASE_ALL...")
+        """Erase APROM only. On the Pico bridge this preserves LDROM and config bytes."""
+        print("  Sending ERASE_ALL (APROM only)...")
         rx = self.send_cmd(CMD_ERASE_ALL, timeout=ERASE_TIMEOUT)
         print("  Erase complete.")
+        return rx
+
+    def chip_erase(self):
+        """Mass erase the whole device, including LDROM and config, via the custom bridge."""
+        if self.fw_ver < ICP_BRIDGE_FW_VER:
+            raise ISPError("Full-chip erase requires the custom ICP bridge firmware (FW >= 0xE0)")
+        print("  Sending ISP_MASS_ERASE (full chip)...")
+        rx = self.send_cmd(CMD_ISP_MASS_ERASE, timeout=ERASE_TIMEOUT)
+        print("  Full-chip erase complete.")
         return rx
 
     def verify_flash(self, expected_data):
@@ -519,7 +540,9 @@ def main():
     parser.add_argument("--write-config", action="store_true",
         help="Write factory-default config (APROM boot, unlocked, no LDROM)")
     parser.add_argument("--erase", action="store_true",
-        help="Mass erase all flash and reset config (recovers locked chips)")
+        help="Erase APROM only (preserves LDROM/config on the custom bridge)")
+    parser.add_argument("--chip-erase", action="store_true",
+        help="Full-chip erase via the custom bridge (erases APROM, LDROM, and config)")
     args = parser.parse_args()
 
     # Resolve port
@@ -532,6 +555,7 @@ def main():
         print(f"Auto-detected port: {port}")
 
     prog = ISPProgrammer(port, args.baud)
+    run_aprom_on_close = False
 
     try:
         prog.open()
@@ -544,14 +568,25 @@ def main():
             print(f"\n  WARNING: Device ID 0x{dev_id:04X} is not MS51FB9AE.")
             print("  Proceeding anyway...\n")
 
+        if args.chip_erase:
+            prog.chip_erase()
+            prog.print_device_info()
+            run_aprom_on_close = True
+            if not args.write_config and args.info:
+                return 0
+
         if args.erase:
             prog.erase_all()
             # Re-read device info after erase
             prog.print_device_info()
+            run_aprom_on_close = True
             if not args.write_config and args.info:
                 return 0
 
         if args.write_config:
+            if dev_id not in MS51FB9AE_DEVIDS:
+                print(f"ERROR: refusing to write config to unknown device 0x{dev_id:04X}")
+                return 1
             # Factory defaults: APROM boot, unlocked, no LDROM, BOD off, WDT stopped
             new_config = bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF])
             print("\n  Writing config: APROM boot, unlocked, full 16KB APROM")
@@ -563,11 +598,13 @@ def main():
             print(f"  Readback:   [{' '.join(f'0x{b:02X}' for b in verify)}]")
             if verify[:5] == new_config[:5]:
                 print("  Config write verified OK.")
+                run_aprom_on_close = True
             else:
                 print("  WARNING: Config readback doesn't match!")
                 return 1
 
         if args.info:
+            run_aprom_on_close = True
             return 0
 
         if args.read:
@@ -576,6 +613,7 @@ def main():
             with open(args.read, "wb") as f:
                 f.write(data)
             print(f"  Saved to {args.read}")
+            run_aprom_on_close = True
             return 0
 
         # Write flash
@@ -588,9 +626,13 @@ def main():
 
         print(f"  Firmware: {args.file} ({len(firmware)} bytes)")
 
-        if len(firmware) > MS51FB9AE_FLASH_SIZE:
-            print(f"ERROR: Firmware ({len(firmware)} bytes) exceeds APROM size ({MS51FB9AE_FLASH_SIZE} bytes)")
+        config = prog.read_config()
+        aprom_size = decode_aprom_size_bytes(config)
+        if len(firmware) > aprom_size:
+            print(f"ERROR: Firmware ({len(firmware)} bytes) exceeds configured APROM size ({aprom_size} bytes)")
             return 1
+        if aprom_size != MS51FB9AE_FLASH_SIZE:
+            print(f"  NOTE: Config reserves {decode_ldrom_size_kb(config)} KB of LDROM; APROM is {aprom_size} bytes.")
 
         prog.program_aprom(firmware)
 
@@ -604,6 +646,7 @@ def main():
                     return 1
 
         print("\n  Done! Resetting to APROM...")
+        run_aprom_on_close = True
         return 0
 
     except ISPError as e:
@@ -616,7 +659,7 @@ def main():
         print("\nCancelled.")
         return 130
     finally:
-        prog.close()
+        prog.close(run_aprom=run_aprom_on_close)
 
 
 if __name__ == "__main__":

@@ -160,8 +160,8 @@ static void timer1_init(void)
      * This keeps the timing simple and avoids ISR nesting issues.
      */
     TMOD = (TMOD & 0x0F) | 0x10;  /* Timer 1 mode 1 */
-    TH1 = (65536 - 2000) >> 8;
-    TL1 = (65536 - 2000) & 0xFF;
+    TH1 = (65536 - (FSYS / 12 / CONTROL_LOOP_HZ)) >> 8;
+    TL1 = (65536 - (FSYS / 12 / CONTROL_LOOP_HZ)) & 0xFF;
     TR1 = 1;   /* Start Timer 1 */
     /* Note: ET1 = 0 — we poll TF1, not using interrupt */
 }

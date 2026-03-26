@@ -39,7 +39,7 @@ static uint8_t  prev_hall_for_stall;
 
 /* Current measurement */
 static uint16_t current_ma;
-static uint16_t velocity_rpm;
+static int16_t  velocity_rpm;
 
 /* PID controllers — in XRAM to save IRAM */
 static pid_t __xdata pid_velocity;
@@ -62,7 +62,8 @@ static uint16_t period_to_rpm(uint16_t period)
     if (period == 0 || period == 0xFFFF)
         return 0;
 
-    uint32_t rpm = 2857143UL / (uint32_t)period;
+    uint32_t rpm = (((FSYS / 12UL) * 60UL) /
+                   (6UL * MOTOR_POLE_PAIRS)) / (uint32_t)period;
     return (uint16_t)rpm;
 }
 
@@ -77,7 +78,7 @@ void motor_init(void)
     target_position = 0;
     torque_limit_ma = CURRENT_LIMIT_MA;
     stall_counter = 0;
-    prev_hall_for_stall = 0;
+    prev_hall_for_stall = hall_read();
     current_ma = 0;
     velocity_rpm = 0;
 
@@ -123,6 +124,7 @@ void motor_start(void)
         return;  /* Must clear fault first */
     fault = FAULT_NONE;
     stall_counter = 0;
+    prev_hall_for_stall = hall_read();
     state = MOTOR_RUN;
     pwm_enable();
 }
@@ -168,6 +170,9 @@ void motor_update(void)
 {
     int16_t duty;
     int8_t actual_dir;
+    uint16_t speed_rpm;
+    uint16_t abs_velocity;
+    uint8_t hall_state;
 
     /* ── Sensor Reading ──────────────────────────────────────────────── */
 
@@ -178,10 +183,29 @@ void motor_update(void)
     current_ma = adc_read_current_ma();
 
     /* Calculate velocity from hall period */
-    velocity_rpm = period_to_rpm(hall_period());
+    speed_rpm = period_to_rpm(hall_period());
     actual_dir = hall_direction();
     if (actual_dir < 0)
-        velocity_rpm = -velocity_rpm;
+        velocity_rpm = -(int16_t)speed_rpm;
+    else
+        velocity_rpm = (int16_t)speed_rpm;
+
+    hall_state = hall_read();
+    if (hall_state == prev_hall_for_stall) {
+        if (stall_counter < 0xFFFF)
+            stall_counter++;
+    } else {
+        prev_hall_for_stall = hall_state;
+        stall_counter = 0;
+    }
+
+    if (stall_counter > STALL_TIMEOUT_MS) {
+        velocity_rpm = 0;
+        actual_dir = 0;
+    }
+
+    abs_velocity = (velocity_rpm < 0) ?
+        (uint16_t)(-velocity_rpm) : (uint16_t)velocity_rpm;
 
     /* ── Fault Detection ─────────────────────────────────────────────── */
 
@@ -195,8 +219,7 @@ void motor_update(void)
 
     /* Hall sensor validity check */
     {
-        uint8_t h = hall_read();
-        if (h == 0 || h == 7) {
+        if (hall_state == 0 || hall_state == 7) {
             pwm_fault_brake();
             state = MOTOR_FAULT;
             fault = FAULT_HALL_INVALID;
@@ -205,20 +228,13 @@ void motor_update(void)
     }
 
     /* Stall detection: if hall state hasn't changed for STALL_TIMEOUT_MS */
-    if (state == MOTOR_RUN) {
-        uint8_t h = hall_read();
-        if (h == prev_hall_for_stall) {
-            stall_counter++;
-            if (stall_counter > STALL_TIMEOUT_MS && current_ma > CURRENT_WARN_MA) {
-                /* Stall detected with high current — reduce duty to prevent damage.
-                 * Don't fault out immediately; just limit current and keep trying.
-                 * This is the key improvement for servo operation at stall. */
-                stall_counter = STALL_TIMEOUT_MS;  /* Cap counter */
-            }
-        } else {
-            prev_hall_for_stall = h;
-            stall_counter = 0;
-        }
+    if (state == MOTOR_RUN &&
+        stall_counter > STALL_TIMEOUT_MS &&
+        current_ma > CURRENT_WARN_MA) {
+        /* Stall detected with high current — reduce duty to prevent damage.
+         * Don't fault out immediately; just limit current and keep trying.
+         * This is the key improvement for servo operation at stall. */
+        stall_counter = STALL_TIMEOUT_MS;  /* Cap counter */
     }
 
     /* ── State Machine ───────────────────────────────────────────────── */
@@ -230,7 +246,7 @@ void motor_update(void)
 
     case MOTOR_BRAKE:
         /* Active braking until speed is near zero */
-        if (velocity_rpm == 0 || velocity_rpm > 60000) {
+        if (abs_velocity < 50) {
             /* Stopped or timer overflow — done braking */
             commutation_coast();
             state = MOTOR_IDLE;
@@ -253,7 +269,7 @@ void motor_update(void)
          * enough that switching direction won't cause destructive
          * current spikes.
          */
-        if (velocity_rpm < 200 || velocity_rpm > 60000) {
+        if (abs_velocity < 200) {
             /* Slow enough to reverse — switch to run in new direction */
             stall_counter = 0;
             state = MOTOR_RUN;
@@ -278,7 +294,7 @@ void motor_update(void)
      * This allows seamless direction reversal for servo operation.
      */
     if (actual_dir != 0 && actual_dir != target_direction &&
-        velocity_rpm > 200) {
+        abs_velocity > 200) {
         state = MOTOR_REVERSING;
         commutation_brake();
         return;

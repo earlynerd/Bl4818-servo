@@ -66,10 +66,14 @@ static void process_command(void)
 
     case 'V':  /* Set target velocity (RPM) */
         parse_int32(&cmd_buf[1], &val);
-        motor_set_mode(MODE_VELOCITY);
-        motor_set_velocity((int16_t)val);
-        motor_start();
-        send_ok();
+        if (val >= -32000 && val <= 32000) {
+            motor_set_mode(MODE_VELOCITY);
+            motor_set_velocity((int16_t)val);
+            motor_start();
+            send_ok();
+        } else {
+            send_err();
+        }
         break;
 
     case 'T':  /* Set torque limit (mA) */
@@ -84,10 +88,14 @@ static void process_command(void)
 
     case 'D':  /* Direct PWM duty (-PWM_MAX to +PWM_MAX) */
         parse_int32(&cmd_buf[1], &val);
-        motor_set_mode(MODE_OPEN_LOOP);
-        motor_set_duty((int16_t)val);
-        motor_start();
-        send_ok();
+        if (val >= -(int32_t)PWM_MAX_DUTY && val <= (int32_t)PWM_MAX_DUTY) {
+            motor_set_mode(MODE_OPEN_LOOP);
+            motor_set_duty((int16_t)val);
+            motor_start();
+            send_ok();
+        } else {
+            send_err();
+        }
         break;
 
     case 'S':  /* Stop (brake) */
