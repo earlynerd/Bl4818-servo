@@ -310,7 +310,77 @@ uint32_t get_aprom_size(){
   config_flags flags;
   read_config(&flags);
   const flash_info_t * flash_info = get_flash_info(N51ICP_read_device_id());
+  if (flash_info == NULL) {
+    return 0;
+  }
   return flash_info_get_aprom_size(flash_info, get_ldrom_size(&flags));
+}
+
+uint32_t get_flash_size() {
+  const flash_info_t * flash_info = get_flash_info(N51ICP_read_device_id());
+  if (flash_info == NULL) {
+    return 0;
+  }
+  return flash_info->memory_size;
+}
+
+static bool is_range_valid(uint32_t addr, uint32_t size, uint32_t limit, const char *label) {
+  if (size == 0) {
+    DEBUG_PRINT("%s write rejected: zero-length request\n", label);
+    return false;
+  }
+  if (limit == 0) {
+    DEBUG_PRINT("%s write rejected: unknown flash size\n", label);
+    return false;
+  }
+  if (addr >= limit) {
+    DEBUG_PRINT("%s write rejected: start 0x%04lx is outside limit 0x%04lx\n", label, (unsigned long)addr, (unsigned long)limit);
+    return false;
+  }
+  if (size > (limit - addr)) {
+    DEBUG_PRINT("%s write rejected: range 0x%04lx..0x%04lx exceeds limit 0x%04lx\n",
+      label,
+      (unsigned long)addr,
+      (unsigned long)(addr + size - 1),
+      (unsigned long)(limit - 1));
+    return false;
+  }
+  return true;
+}
+
+static bool is_aprom_range_valid(uint32_t addr, uint32_t size) {
+  return is_range_valid(addr, size, get_aprom_size(), "APROM");
+}
+
+static bool is_nvm_range_valid(uint32_t addr, uint32_t size) {
+  return is_range_valid(addr, size, get_flash_size(), "whole-ROM");
+}
+
+static bool is_config_safe(const config_flags *flags) {
+#if NO_DANGEROUS_CONFIGS
+  config_flags decoded = *flags;
+  if (flags->RPD == 0) {
+    DEBUG_PRINT("Refusing config write with reset pin disabled\n");
+    return false;
+  }
+  if (flags->CBS == 0 && get_ldrom_size(&decoded) == 0) {
+    DEBUG_PRINT("Refusing config write that boots LDROM when no LDROM is reserved\n");
+    return false;
+  }
+#endif
+  return true;
+}
+
+static bool write_config_checked(const uint8_t *config_bytes) {
+  uint8_t verify_buf[CFG_FLASH_LEN];
+  N51ICP_page_erase(CFG_FLASH_ADDR);
+  N51ICP_write_flash(CFG_FLASH_ADDR, CFG_FLASH_LEN, (uint8_t *)config_bytes);
+  N51ICP_read_flash(CFG_FLASH_ADDR, CFG_FLASH_LEN, verify_buf);
+  if (memcmp(verify_buf, config_bytes, CFG_FLASH_LEN) != 0) {
+    DEBUG_PRINT("Config write verification failed\n");
+    return false;
+  }
+  return true;
 }
 
 void dump()
@@ -677,16 +747,15 @@ void loop()
       case CMD_UPDATE_CONFIG: {
         DEBUG_PRINT("CMD_UPDATE_CONFIG\n");
         INVALIDATE_CACHE;
-#if NO_DANGEROUS_CONFIGS
-        config_flags * update_flags = (config_flags *)&rx_buf[8];
-        if (update_flags->RPD == 0 && update_flags->WDTEN & 0x0F == 0xF) {
-          DEBUG_PRINT("Refusing to set potentially-dangerous config with the reset pin disabled and watchdog timer disabled ...\n");
+        const config_flags * update_flags = (const config_flags *)&rx_buf[8];
+        if (!is_config_safe(update_flags)) {
           fail_pkt();
           break;
         }
-#endif
-        N51ICP_page_erase(CFG_FLASH_ADDR);
-        N51ICP_write_flash(CFG_FLASH_ADDR, CFG_FLASH_LEN, &rx_buf[8]);
+        if (!write_config_checked(&rx_buf[8])) {
+          fail_pkt();
+          break;
+        }
         send_pkt();
       } break;
       case CMD_ERASE_ALL: // Erase all only erases the AP ROM, so we have to page erase the APROM area
@@ -697,8 +766,13 @@ void loop()
         // int ldrom_size = get_ldrom_size(&flags);
         // DEBUG_PRINT("ldrom_size: %d\n", ldrom_size);
         uint32_t aprom_size = get_aprom_size();
+        if (aprom_size == 0) {
+          DEBUG_PRINT("Erase rejected: unknown APROM size\n");
+          fail_pkt();
+          break;
+        }
         DEBUG_PRINT("Erasing %d bytes of APROM\n", aprom_size);
-        for (int i = 0; i < aprom_size; i += PAGE_SIZE) {
+        for (uint32_t i = 0; i < aprom_size; i += PAGE_SIZE) {
           N51ICP_page_erase(i);
         }
         send_pkt();
@@ -739,14 +813,14 @@ void loop()
         g_update_checksum = 0;
         DEBUG_PRINT("CMD_UPDATE_WHOLE_ROM\n");
         INVALIDATE_CACHE;
-        // preserved_ldrom_sz = 0;
-        if (!mass_erase_checked(true)) break;
         update_addr = (rx_buf[9] << 8) | rx_buf[8];
         update_size = (rx_buf[13] << 8) | rx_buf[12];
-        if (update_size == 0){
+        if (!is_nvm_range_valid((uint32_t)update_addr, update_size)) {
           fail_pkt();
           break;
         }
+        // preserved_ldrom_sz = 0;
+        if (!mass_erase_checked(true)) break;
         DEBUG_PRINT("flashing %d bytes\n", update_size);
         update(&rx_buf[16], 48);
         add_g_total_checksum();
@@ -760,21 +834,20 @@ void loop()
         update_addr = (rx_buf[9] << 8) | rx_buf[8];
         update_size = (rx_buf[13] << 8) | rx_buf[12];
         DEBUG_PRINT("CMD_UPDATE_APROM (addr: %d, size: %d)\n", update_addr, update_size);
-        if (update_size == 0){
+        if (!is_aprom_range_valid((uint32_t)update_addr, update_size)) {
           fail_pkt();
           break;
         }
         read_config(&flags);
         
         cid = N51ICP_read_cid();
-        int ldrom_size = get_ldrom_size(&flags);
         INVALIDATE_CACHE;
         // Specification states that we need to erase the aprom when we receive this command
-        if (flags.LOCK != 0 && cid != 0xFF) {
+        if (flags.LOCK != 0 && cid != 0xFF && cid != 0x00) {
           // device is not locked, we need to erase only the areas we're going to write to
-          uint16_t start_addr = update_addr & PAGE_MASK;
-          uint16_t end_addr = (start_addr + update_size);
-          for (uint16_t curr_addr = update_addr; curr_addr < end_addr; curr_addr += PAGE_SIZE){
+          uint32_t start_addr = ((uint32_t)update_addr) & PAGE_MASK;
+          uint32_t end_addr = (((uint32_t)update_addr) + update_size - 1) & PAGE_MASK;
+          for (uint32_t curr_addr = start_addr; curr_addr <= end_addr; curr_addr += PAGE_SIZE){
             N51ICP_page_erase(curr_addr);
           }
         } else { // device is locked, we'll need to do a mass erase
