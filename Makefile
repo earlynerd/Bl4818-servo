@@ -60,7 +60,7 @@ LDFLAGS += -o $(IHX)
 # ── Rules ────────────────────────────────────────────────────────────────────
 .PHONY: all clean flash size
 
-all: $(IHX)
+all: $(IHX) $(BIN)
 
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)

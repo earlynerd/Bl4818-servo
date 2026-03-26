@@ -27,10 +27,11 @@ void adc_init(void)
 
     /*
      * Disable digital input buffer on ADC pins to reduce noise.
-     * AINDIDS: bit=0 enables analog, bit=1 keeps digital.
-     * Clear bits for channels we use as analog inputs.
+     * AINDIDS: bit=1 disables digital input (needed for analog).
+     *          bit=0 enables digital input (default).
+     * Per TRM page 349: set bits for channels used as analog inputs.
      */
-    AINDIDS &= ~0x0C;   /* Clear bits 3,2 for ADC_CH3(P0.6), ADC_CH2(P0.7) */
+    AINDIDS |= 0x0C;    /* Set bits 3,2 to disable digital input on ADC_CH3, ADC_CH2 */
 
     /*
      * ADCCON1: ADC configuration
@@ -64,8 +65,8 @@ uint16_t adc_read(uint8_t channel)
     /* Clear completion flag */
     ADCF = 0;
 
-    /* Read 12-bit result: ADCRH[7:0]=bits[11:4], ADCRL[7:4]=bits[3:0] */
-    result = ((uint16_t)ADCRH << 4) | ((ADCRL >> 4) & 0x0F);
+    /* Read 12-bit result: ADCRH[7:0]=bits[11:4], ADCRL[3:0]=bits[3:0] */
+    result = ((uint16_t)ADCRH << 4) | (ADCRL & 0x0F);
 
     return result;
 }

@@ -41,9 +41,9 @@ static uint8_t  prev_hall_for_stall;
 static uint16_t current_ma;
 static uint16_t velocity_rpm;
 
-/* PID controllers */
-static pid_t pid_velocity;
-static pid_t pid_position;
+/* PID controllers — in XRAM to save IRAM */
+static pid_t __xdata pid_velocity;
+static pid_t __xdata pid_position;
 
 /* Convert hall transition period to RPM */
 static uint16_t period_to_rpm(uint16_t period)

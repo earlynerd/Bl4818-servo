@@ -27,7 +27,4 @@ uint8_t uart_available(void);
 /* Read a byte from receive buffer (-1 if empty) */
 int16_t uart_getc(void);
 
-/* UART ISR handler */
-void uart_isr(void);
-
 #endif /* UART_H */

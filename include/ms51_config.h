@@ -35,7 +35,7 @@
 #define MS51_CONFIG_H
 
 /* ── System Clock ────────────────────────────────────────────────────────── */
-#define FSYS            24000000UL  /* 24 MHz HIRC */
+#define FSYS            16000000UL  /* 16 MHz HIRC (default after reset) */
 
 /* ── PWM Configuration ───────────────────────────────────────────────────── */
 #define PWM_FREQUENCY   20000       /* 20 kHz switching frequency */

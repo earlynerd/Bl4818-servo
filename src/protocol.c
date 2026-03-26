@@ -13,7 +13,7 @@
 #include "encoder.h"
 #include <string.h>
 
-static char cmd_buf[PROTO_BUF_SIZE];
+static char __xdata cmd_buf[PROTO_BUF_SIZE];
 static uint8_t cmd_len;
 
 /* Parse a decimal integer from string, returns pointer past the number */

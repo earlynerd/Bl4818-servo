@@ -18,14 +18,47 @@
 
 #define PARAM_PAGE_ADDR  0x3F80  /* Last 128-byte page of 16KB APROM */
 
+/*
+ * IAP helper: enable IAP mode (IAPEN in CHPCON, TA-protected).
+ * Must be called before any IAP operation.
+ */
+static void iap_enable(void)
+{
+    TIMED_ACCESS();
+    CHPCON |= 0x01;     /* IAPEN = 1 */
+}
+
+/*
+ * IAP helper: disable IAP mode.
+ * Should be called after IAP operations to save power (stops HIRC if external clock).
+ */
+static void iap_disable(void)
+{
+    TIMED_ACCESS();
+    CHPCON &= ~0x01;    /* IAPEN = 0 */
+}
+
+/*
+ * IAP helper: trigger IAP operation (IAPTRG is TA-protected).
+ * Per TRM page 196: set IAPGO (IAPTRG.0) with timed access.
+ * Interrupts must be disabled around the TA + trigger sequence.
+ */
+static void iap_trigger(void)
+{
+    uint8_t ea_save = EA;
+    EA = 0;              /* Disable interrupts during IAP trigger */
+    TIMED_ACCESS();
+    IAPTRG |= 0x01;     /* Set IAPGO to start IAP operation */
+    __asm__("nop");
+    EA = ea_save;        /* Restore interrupt state */
+}
+
 static void iap_byte_read(uint16_t addr, uint8_t *data)
 {
     IAPAL = (uint8_t)(addr & 0xFF);
     IAPAH = (uint8_t)(addr >> 8);
     IAPCN = IAP_BYTE_READ;
-    IAPTRG = 0x5A;  /* Trigger IAP */
-    /* One NOP required after trigger */
-    __asm__("nop");
+    iap_trigger();
     *data = IAPFD;
 }
 
@@ -36,15 +69,13 @@ static void iap_byte_program(uint16_t addr, uint8_t data)
     IAPFD = data;
     IAPCN = IAP_BYTE_PROGRAM;
 
-    /* Enable IAP write (timed access required) */
     TIMED_ACCESS();
-    IAPUEN = 0x01;  /* Enable APROM write */
+    IAPUEN = 0x01;       /* Enable APROM write */
 
-    IAPTRG = 0x5A;
-    __asm__("nop");
+    iap_trigger();
 
     TIMED_ACCESS();
-    IAPUEN = 0x00;  /* Disable APROM write */
+    IAPUEN = 0x00;       /* Disable APROM write */
 }
 
 static void iap_page_erase(uint16_t addr)
@@ -54,13 +85,12 @@ static void iap_page_erase(uint16_t addr)
     IAPCN = IAP_PAGE_ERASE;
 
     TIMED_ACCESS();
-    IAPUEN = 0x01;
+    IAPUEN = 0x01;       /* Enable APROM write */
 
-    IAPTRG = 0x5A;
-    __asm__("nop");
+    iap_trigger();
 
     TIMED_ACCESS();
-    IAPUEN = 0x00;
+    IAPUEN = 0x00;       /* Disable APROM write */
 }
 
 static uint8_t compute_checksum(const params_t *p)
@@ -80,9 +110,13 @@ void flash_load_params(params_t *p)
     uint8_t *dst = (uint8_t *)p;
     uint8_t i;
 
+    iap_enable();
+
     for (i = 0; i < sizeof(params_t); i++) {
         iap_byte_read(PARAM_PAGE_ADDR + i, &dst[i]);
     }
+
+    iap_disable();
 
     /* Validate */
     if (p->magic != PARAMS_MAGIC || compute_checksum(p) != p->checksum) {
@@ -101,6 +135,8 @@ void flash_save_params(const params_t *p)
     tmp.magic = PARAMS_MAGIC;
     tmp.checksum = compute_checksum(&tmp);
 
+    iap_enable();
+
     /* Erase the parameter page */
     iap_page_erase(PARAM_PAGE_ADDR);
 
@@ -109,6 +145,8 @@ void flash_save_params(const params_t *p)
     for (i = 0; i < sizeof(params_t); i++) {
         iap_byte_program(PARAM_PAGE_ADDR + i, src[i]);
     }
+
+    iap_disable();
 }
 
 void flash_default_params(params_t *p)

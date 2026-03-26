@@ -16,6 +16,8 @@ __sfr __at(0x80) P0;
 __sfr __at(0x81) SP;
 __sfr __at(0x82) DPL;
 __sfr __at(0x83) DPH;
+__sfr __at(0x84) RCTRIM0;  /* TA protected — HIRC 16 MHz trim [8:1] */
+__sfr __at(0x85) RCTRIM1;  /* TA protected — HIRC 16 MHz trim [0] + HIRC24 (bit 4) */
 __sfr __at(0x87) PCON;
 __sfr __at(0x88) TCON;
 __sfr __at(0x89) TMOD;
@@ -74,6 +76,7 @@ __sfr __at(0xAA) WDCON;    /* TA protected */
 __sfr __at(0xB7) IPH;      /* Page 0 (shares B7 with PWMINTC on page 1) */
 __sfr __at(0xA9) SADDR;
 __sfr __at(0xB9) SADEN;
+__sfr __at(0x97) CKEN;     /* TA protected — clock enable */
 __sfr __at(0x9B) EIE;      /* Extended interrupt enable */
 __sfr __at(0x9C) EIE1;     /* Extended interrupt enable 1 */
 __sfr __at(0xEF) EIP;      /* Extended interrupt priority */
@@ -153,6 +156,7 @@ __sfr __at(0xA4) IAPTRG;   /* TA protected — IAP trigger */
 __sfr __at(0xA5) IAPUEN;   /* TA protected — IAP update enable */
 __sfr __at(0xA6) IAPAL;    /* IAP address low */
 __sfr __at(0xA7) IAPAH;    /* IAP address high */
+__sfr __at(0x9F) CHPCON;   /* TA protected — chip control (bit 0 = IAPEN) */
 __sfr __at(0xAE) IAPFD;    /* IAP flash data */
 __sfr __at(0xAF) IAPCN;    /* IAP command */
 
@@ -184,8 +188,8 @@ __sbit __at(0x95) P15;
 __sbit __at(0x96) P16;
 __sbit __at(0x97) P17;
 
-/* P3 bits (base 0xF0 — yes, P3 is at F0H on MS51) */
-__sbit __at(0xF0) P30;
+/* P3 bits (base 0xB0) */
+__sbit __at(0xB0) P30;
 
 /* TCON bits (base 0x88) */
 __sbit __at(0x88) IT0;
@@ -216,6 +220,13 @@ __sbit __at(0x99) TI;
 __sbit __at(0x9C) REN;
 __sbit __at(0x9E) SM1;
 __sbit __at(0x9F) SM0;
+
+/* SCON_1 bits (base 0xF8) */
+__sbit __at(0xF8) RI_1;
+__sbit __at(0xF9) TI_1;
+__sbit __at(0xFC) REN_1;
+__sbit __at(0xFE) SM1_1;
+__sbit __at(0xFF) SM0_1;
 
 /* T2CON bits (base 0xC8) */
 __sbit __at(0xC8) CM_RL2;
@@ -269,6 +280,7 @@ __sbit __at(0xEF) ADCF;
 
 /* ── IAP Commands ────────────────────────────────────────────────────────── */
 #define IAP_BYTE_READ     0x00
+#define IAP_READ_UID      0x04
 #define IAP_BYTE_PROGRAM  0x21
 #define IAP_PAGE_ERASE    0x22
 #define IAP_AP_SZ_SELECT  0xE1
