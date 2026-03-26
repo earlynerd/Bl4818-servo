@@ -66,12 +66,12 @@ uint16_t adc_read_current_ma(void)
     uint16_t raw = adc_read(ADC_CH_CURRENT);
 
     /*
-     * Direct shunt, no amplifier. VDD = 5.0V reference.
+     * Direct shunt (20mΩ, R020), no amplifier. VDD = 5.0V reference.
      *
      * I_mA = raw × ADC_TO_MA_NUM / ADC_TO_MA_DEN
-     *      = raw × 625 / 26    (for 50mΩ shunt)
+     *      = raw × 2500 / 41
      *
-     * At 50mΩ: ~24mA per LSB, 5A = ADC ~205
+     * At 20mΩ: ~61mA per LSB, 5A = ADC ~82
      *
      * Use 32-bit intermediate to avoid overflow.
      */

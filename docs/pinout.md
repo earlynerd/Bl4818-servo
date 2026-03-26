@@ -108,22 +108,25 @@ fast commutation updates on those two channels.
 - **Shunt:** Single low-side, direct connection to MCU (NO op-amp amplifier)
 - **ADC pin:** P0.6 (pin 2) = **ADC_CH3**
 - **ADC reference:** VDD = **5.0V**
-- **Shunt resistance:** ___ mΩ (read marking or measure)
+- **Shunt resistance:** **20 mΩ** (2512 package, marked "R020")
 
 With no amplifier, the ADC reads the raw shunt voltage:
 ```
-V_adc = I_motor × R_shunt
+V_adc = I_motor × 0.020Ω
 ADC_val = V_adc / 5.0 × 4096
 
-I_mA = ADC_val × 5000 / (4096 × R_shunt_ohm)
+I_mA = ADC_val × 2500 / 41
 ```
 
-For a typical 50mΩ shunt:
-- 1A → 50mV → ADC reading 41
-- 5A → 250mV → ADC reading 205
-- Resolution is coarse without amplification (~12mA per LSB at 50mΩ)
+| Current | Shunt Voltage | ADC Count | Notes             |
+|---------|--------------|-----------|-------------------|
+| 1A      | 20mV         | ~16       |                   |
+| 3A      | 60mV         | ~49       | Soft limit        |
+| 5A      | 100mV        | ~82       | Hard limit        |
+| 10A     | 200mV        | ~164      | Stall/fault       |
 
-> TODO: Measure or read shunt resistance value
+Resolution: **~61mA per ADC LSB** — coarse but workable for overcurrent
+protection. Fine current regulation will be limited by this resolution.
 
 ## Battery Voltage — CONFIRMED
 

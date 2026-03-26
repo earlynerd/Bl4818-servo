@@ -132,8 +132,10 @@
 #define MOTOR_POLE_PAIRS    7       /* BL4818 = 14 poles / 7 pole pairs */
 #define HALL_STATES_PER_REV (6 * MOTOR_POLE_PAIRS)  /* 42 states/mech rev */
 
-/* ── Current Sensing — CONFIRMED: Direct shunt, no amplifier ─────────── */
-#define SHUNT_RESISTANCE_MOHM   50      /* 50 milliohm — TODO: verify value */
+/* ── Current Sensing — CONFIRMED ──────────────────────────────────────── */
+/* Shunt: 2512 package, marked "R020" = 20 milliohm (0.020Ω)             */
+/* Direct to ADC (no amplifier). VDD = 5.0V reference.                    */
+#define SHUNT_RESISTANCE_MOHM   20      /* 20 milliohm (R020 marking) */
 #define CURRENT_AMP_GAIN        1       /* No amplifier — direct to ADC */
 #define ADC_VREF_MV             5000    /* VDD = 5.0V confirmed */
 #define ADC_RESOLUTION          4096    /* 12-bit ADC */
@@ -141,22 +143,22 @@
 #define CURRENT_WARN_MA         3000    /* Soft current limit for regulation */
 
 /*
- * Convert ADC reading to milliamps (no amplifier):
- *   V_shunt = I × R_shunt
- *   ADC_val = V_shunt / V_ref × 4096
- *   I_mA = ADC_val × V_ref_mV / (4096 × R_shunt_ohm)
- *        = ADC_val × 5000 / (4096 × 0.050)
- *        = ADC_val × 5000 / 204.8
- *        ≈ ADC_val × 625 / 26    (simplified)
+ * Convert ADC reading to milliamps (no amplifier, 20mΩ shunt):
+ *   V_shunt = I × R_shunt = I × 0.020
+ *   ADC_val = V_shunt / 5.0 × 4096
+ *   I_mA = ADC_val × 5000 / (4096 × 0.020)
+ *        = ADC_val × 5000 / 81.92
+ *        ≈ ADC_val × 5000 / 82
+ *        ≈ ADC_val × 2500 / 41
  *
- * Resolution: ~24mA per ADC LSB (with 50mΩ shunt, no amp)
- * Full scale: 5V / 0.050Ω = 100A (but FETs limit well before that)
- * 5A → 250mV → ADC ≈ 205
- *
- * NOTE: Update SHUNT_RESISTANCE_MOHM after reading the actual shunt value.
+ * Resolution: ~61mA per ADC LSB
+ * 1A  →  20mV → ADC ≈  16
+ * 3A  →  60mV → ADC ≈  49
+ * 5A  → 100mV → ADC ≈  82
+ * 10A → 200mV → ADC ≈ 164
  */
-#define ADC_TO_MA_NUM       625
-#define ADC_TO_MA_DEN       26
+#define ADC_TO_MA_NUM       2500
+#define ADC_TO_MA_DEN       41
 
 /* ── Battery Voltage — CONFIRMED: 10k/10k divider ───────────────────── */
 /*
