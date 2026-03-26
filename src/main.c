@@ -5,11 +5,11 @@
  * and runs the main control loop.
  *
  * Architecture:
- *   Timer 0 — PWM generation ISR (20 kHz)
- *   Timer 2 — Free-running counter for speed measurement
+ *   PWM0    — Hardware complementary PWM (20 kHz, 6 channels, dead-time)
  *   Timer 1 — 1 kHz tick for control loop timing
+ *   Timer 2 — Free-running counter for speed measurement
  *   Timer 3 — UART baud rate generator
- *   UART0   — Serial command interface (115200 baud)
+ *   UART1   — Serial command interface (115200 baud, on prog header)
  *   ADC     — Current and voltage sensing (polled in control loop)
  *   GPIO    — Hall sensors (polled), encoder (polled/ISR)
  *
@@ -133,20 +133,14 @@ static void sys_init(void)
     /* Switch to 24 MHz HIRC */
     SET_HIRC_24MHZ();
 
-    /* Configure LED pin as push-pull output */
+    /* Configure direction input pin: P1.4 (pin 11) */
+    P1M1 |=  0x10;   /* P1.4 M1=1 (input) */
+    P1M2 &= ~0x10;   /* P1.4 M2=0 */
+
 #if FEATURE_LED
-    P0M1 &= ~0x10;  /* P0.4 */
-    P0M2 |=  0x10;
-    LED_PIN = 0;
+    /* Configure LED pin as push-pull output (if LED added to spare pin) */
+    /* LED_PIN = 0; */
 #endif
-
-    /* Configure direction input pin */
-    P0M1 |=  0x01;   /* P0.0 input */
-    P0M2 &= ~0x01;
-
-    /* Configure enable pin */
-    P0M1 |=  0x08;   /* P0.3 input */
-    P0M2 &= ~0x08;
 }
 
 /* ── Timer 1: 1 kHz Control Loop Tick ────────────────────────────────────── */
