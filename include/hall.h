@@ -27,7 +27,10 @@ int32_t hall_count(void);
 /* Reset hall counter */
 void hall_count_reset(void);
 
-/* Call from pin-change ISR */
+/* Poll for hall transitions from a fast path; returns 1 when a valid edge was processed */
+uint8_t hall_poll(void);
+
+/* Compatibility wrapper for ISR-style call sites */
 void hall_isr(void);
 
 #endif /* HALL_H */

@@ -29,8 +29,8 @@
 #include "protocol.h"
 #include "flash.h"
 
-/* Saved parameters */
-static params_t params;
+/* Saved parameters — in XRAM to save IRAM */
+static params_t __xdata params;
 
 /* LED blink state */
 static uint16_t led_counter;
@@ -91,6 +91,9 @@ void main(void)
 
     /* ── Main Loop ───────────────────────────────────────────────────── */
     while (1) {
+        /* Fast path: keep commutation aligned to hall edges between 1 kHz control ticks */
+        motor_poll_fast();
+
         /* Wait for Timer 1 overflow (1 kHz tick) */
         if (TF1) {
             TF1 = 0;  /* Clear flag */
@@ -130,8 +133,12 @@ void main(void)
 /* ── System Clock and GPIO Initialization ────────────────────────────────── */
 static void sys_init(void)
 {
-    /* Switch to 24 MHz HIRC */
-    SET_HIRC_24MHZ();
+    /*
+     * HIRC defaults to 16 MHz after reset.
+     * TODO: switch to 24 MHz by reading factory trim from UID area.
+     * For now, run at 16 MHz (FSYS must match in ms51_config.h).
+     */
+    CKDIV = 0x00;       /* No divider: FSYS = FOSC = 16 MHz */
 
     /* Configure direction input pin: P1.4 (pin 11) */
     P1M1 |=  0x10;   /* P1.4 M1=1 (input) */
@@ -156,8 +163,8 @@ static void timer1_init(void)
      * This keeps the timing simple and avoids ISR nesting issues.
      */
     TMOD = (TMOD & 0x0F) | 0x10;  /* Timer 1 mode 1 */
-    TH1 = (65536 - 2000) >> 8;
-    TL1 = (65536 - 2000) & 0xFF;
+    TH1 = (65536 - (FSYS / 12 / CONTROL_LOOP_HZ)) >> 8;
+    TL1 = (65536 - (FSYS / 12 / CONTROL_LOOP_HZ)) & 0xFF;
     TR1 = 1;   /* Start Timer 1 */
     /* Note: ET1 = 0 — we poll TF1, not using interrupt */
 }
@@ -205,7 +212,7 @@ static void wdt_feed(void)
 static void led_update(void)
 {
     led_counter++;
-
+	#if FEATURE_LED
     switch (motor_get_state()) {
     case MOTOR_IDLE:
         /* Slow blink: 0.5 Hz */
@@ -232,6 +239,7 @@ static void led_update(void)
         if (led_counter >= 100) led_counter = 0;
         break;
     }
+	#endif
 }
 
 /* ── Apply Loaded Parameters ─────────────────────────────────────────────── */

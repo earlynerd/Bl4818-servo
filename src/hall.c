@@ -122,17 +122,17 @@ void hall_count_reset(void)
     hall_position = 0;
 }
 
-void hall_isr(void)
+uint8_t hall_poll(void)
 {
     uint8_t current = hall_read();
 
     if (current == prev_hall)
-        return;  /* No change (debounce / noise) */
+        return 0;  /* No change (debounce / noise) */
 
     /* Detect invalid states */
     if (current == 0 || current == 7) {
         /* Hall sensor fault — don't update */
-        return;
+        return 0;
     }
 
     /* Determine direction from state transition */
@@ -151,4 +151,10 @@ void hall_isr(void)
     last_transition_time = now;
 
     prev_hall = current;
+    return 1;
+}
+
+void hall_isr(void)
+{
+    (void)hall_poll();
 }

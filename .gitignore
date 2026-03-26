@@ -1,4 +1,5 @@
 build/
+*.pyc
 *.rel
 *.lst
 *.sym
@@ -15,3 +16,4 @@ build/
 *~
 .vscode/
 .idea/
+__pycache__

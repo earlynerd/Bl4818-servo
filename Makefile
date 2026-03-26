@@ -12,7 +12,11 @@ SIZE     = size
 MCU      = mcs51
 XRAM_SIZE = 1024
 XRAM_LOC  = 0x0000
-CODE_SIZE = 16384
+# Set APROM_SIZE/LDROM_SIZE together when reserving LDROM.
+FLASH_TOTAL_SIZE ?= 16384
+LDROM_SIZE ?= 0
+APROM_SIZE ?= 16384
+CODE_SIZE = $(APROM_SIZE)
 IRAM_SIZE = 256
 STACK_SIZE = 64
 
@@ -36,6 +40,14 @@ IHX      = $(BUILDDIR)/$(TARGET).ihx
 HEX      = $(BUILDDIR)/$(TARGET).hex
 BIN      = $(BUILDDIR)/$(TARGET).bin
 
+ifeq ($(OS),Windows_NT)
+MKDIR_BUILD = powershell -NoProfile -Command "if (-not (Test-Path '$(BUILDDIR)')) { New-Item -ItemType Directory '$(BUILDDIR)' | Out-Null }"
+RMDIR_BUILD = powershell -NoProfile -Command "if (Test-Path '$(BUILDDIR)') { Remove-Item -Recurse -Force '$(BUILDDIR)' }"
+else
+MKDIR_BUILD = mkdir -p $(BUILDDIR)
+RMDIR_BUILD = rm -rf $(BUILDDIR)
+endif
+
 # ── Compiler Flags ───────────────────────────────────────────────────────────
 CFLAGS  = -m$(MCU)
 CFLAGS += -I$(INCDIR)
@@ -44,6 +56,9 @@ CFLAGS += --opt-code-size
 CFLAGS += --stack-auto
 CFLAGS += --model-small
 CFLAGS += --no-xinit-opt
+CFLAGS += -DFLASH_TOTAL_SIZE=$(FLASH_TOTAL_SIZE)
+CFLAGS += -DLDROM_SIZE=$(LDROM_SIZE)
+CFLAGS += -DAPROM_SIZE=$(APROM_SIZE)
 
 # ── Linker Flags ─────────────────────────────────────────────────────────────
 LDFLAGS  = -m$(MCU)
@@ -60,10 +75,11 @@ LDFLAGS += -o $(IHX)
 # ── Rules ────────────────────────────────────────────────────────────────────
 .PHONY: all clean flash size
 
-all: $(IHX)
+all: $(IHX) $(BIN)
 
 $(BUILDDIR):
-	mkdir -p $(BUILDDIR)
+	$(RMDIR_BUILD)
+	$(MKDIR_BUILD)
 
 $(BUILDDIR)/%.rel: $(SRCDIR)/%.c $(wildcard $(INCDIR)/*.h) | $(BUILDDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -78,7 +94,7 @@ $(BIN): $(IHX)
 	$(OBJCOPY) -I ihex -O binary $< $@
 
 clean:
-	rm -rf $(BUILDDIR)
+	$(RMDIR_BUILD)
 
 flash: $(IHX)
 	@echo "Flashing $(IHX) via Nu-Link..."

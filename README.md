@@ -133,6 +133,36 @@ available and produces comparable code for the 8051 target. The MS51 BSP headers
 have been adapted from the [MS51BSP_SDCC](https://github.com/danchouzhou/MS51BSP_SDCC)
 project.
 
+### Bridge Recovery
+
+The custom Pico ICP bridge in `nu-link/` now supports switched target power for unbricking bad MS51 config states.
+
+- Use **GPIO10** on the Pico bridge as the enable signal for a **high-side switch** feeding the target MCU `VDD` pin on the programming header `+`.
+- Keep bridge `GND`, `ICE_DAT`, `ICE_CLK`, and `nRESET` wired normally.
+- Switch the **5V logic rail only**, not the motor supply.
+
+Typical recovery flow:
+
+```bash
+python flash.py --recover
+```
+
+Useful manual controls:
+
+```bash
+python flash.py --target-power off
+python flash.py --target-power on
+python flash.py --power-cycle-connect --info
+```
+
+If the target only enters ICP at a narrow power-up window, sweep delays explicitly:
+
+```bash
+python flash.py --recover --power-off-ms 100 \
+  --power-on-delay-us 50 --power-on-delay-us 100 --power-on-delay-us 250 \
+  --power-on-delay-us 500 --power-on-delay-us 1000 --power-on-delay-us 5000
+```
+
 ## Project Structure
 
 ```
