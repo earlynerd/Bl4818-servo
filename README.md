@@ -38,7 +38,8 @@ BL4818 brushless motor driver board (commonly sold for massage gun / fascia gun 
 | Flash              | 16 KB (APROM)             |
 | RAM                | 256B IRAM + 1KB XRAM      |
 | Package            | TSSOP-20                  |
-| Supply Voltage     | 12–24V DC (3S–6S LiPo)   |
+| Supply Voltage     | 12V DC (3S LiPo)         |
+| Logic Voltage      | 5V (onboard regulator)   |
 | Bridge             | 3-phase complementary (P+N pair per phase) |
 | Position Sensing   | 3× Hall effect sensors    |
 | Current Sensing    | Low-side shunt resistor   |
@@ -50,41 +51,41 @@ From the official Nuvoton datasheet:
 ```
 Pin  Port   Key Functions                      Board Connection
 ───  ─────  ─────────────────────────────────  ─────────────────────
- 1   P0.5   T0 / PWM0_CH2 / ADC_CH4           TBD — VERIFY
- 2   P0.6   UART0_TXD / ADC_CH3               TBD — VERIFY
- 3   P0.7   UART0_RXD / ADC_CH2               TBD — VERIFY
+ 1   P0.5   T0 / PWM0_CH2 / ADC_CH4           Tach output (N-FET inverted)
+ 2   P0.6   UART0_TXD / ADC_CH3               Current shunt (direct, no amp)
+ 3   P0.7   UART0_RXD / ADC_CH2               Battery voltage (10k/10k divider)
  4   P2.0   nRESET                             Prog header "R"
- 5   P3.0   INT0 / ADC_CH1                     TBD — VERIFY
- 6   P1.7   INT1 / ADC_CH0                     TBD — VERIFY
- 7   VSS    Ground                             GND (confirmed)
+ 5   P3.0   INT0 / ADC_CH1                     Hall sensor 3
+ 6   P1.7   INT1 / ADC_CH0                     Hall sensor 2
+ 7   VSS    Ground                             GND
  8   P1.6   ICE_DAT / UART1_TX / [I2C0_SDA]   Prog header "P"
- 9   VDD    Power (2.4–5.5V)                   VDD (confirmed)
-10   P1.5   PWM0_CH5 / SPI0_SS                 TBD — VERIFY
-11   P1.4   PWM0_BRAKE / PWM0_CH1              TBD — VERIFY
-12   P1.3   I2C0_SCL                           TBD — VERIFY
-13   P1.2   PWM0_CH0                           TBD — VERIFY
-14   P1.1   ADC_CH7 / PWM0_CH1 / CLKO         TBD — VERIFY
-15   P1.0   PWM0_CH2 / SPI0_CLK                TBD — VERIFY
-16   P0.0   PWM0_CH3 / SPI0_MOSI / T1         TBD — VERIFY
-17   P0.1   PWM0_CH4 / SPI0_MISO               TBD — VERIFY
+ 9   VDD    Power (2.4–5.5V)                   5V from regulator
+10   P1.5   PWM0_CH5 / SPI0_SS                 Hall sensor 1
+11   P1.4   PWM0_BRAKE / PWM0_CH1              Direction input
+12   P1.3   I2C0_SCL                           NC (available for expansion)
+13   P1.2   PWM0_CH0                           Phase U low-side gate
+14   P1.1   ADC_CH7 / PWM0_CH1                 Phase U high-side gate
+15   P1.0   PWM0_CH2 / SPI0_CLK                Phase V high-side gate
+16   P0.0   PWM0_CH3 / SPI0_MOSI / T1         Phase V low-side gate
+17   P0.1   PWM0_CH4 / SPI0_MISO               Phase W low-side gate
 18   P0.2   ICE_CLK / UART1_RX / [I2C0_SCL]   Prog header "S"
-19   P0.3   ADC_CH6 / PWM0_CH5                 TBD — VERIFY
-20   P0.4   ADC_CH5 / PWM0_CH3 / STADC         TBD — VERIFY
+19   P0.3   ADC_CH6 / PWM0_CH5                 Phase W high-side gate
+20   P0.4   ADC_CH5 / PWM0_CH3 / STADC         PWM speed input (unpop RC)
 ```
 
 **Programming header** (silkscreen: P, R, S, +, −):
 P = ICE_DAT (pin 8), R = nRESET (pin 4), S = ICE_CLK (pin 18),
 \+ = VDD (pin 9), − = GND (pin 7)
 
-> **Note:** Board-specific pin assignments (which pin drives which gate, etc.)
-> are being mapped with a multimeter. See [docs/pinout.md](docs/pinout.md) for
-> the detailed worksheet and current progress.
+> All pin assignments confirmed by multimeter probing.
+> See [docs/pinout.md](docs/pinout.md) for detailed circuit notes.
 
 ### UART
 
-UART0 TX/RX are on P0.6 (pin 2) and P0.7 (pin 3) per the datasheet.
-These pins also have ADC capability (CH3/CH2). Availability depends on
-what the stock board uses them for.
+UART0 TX/RX are on P0.6 (pin 2) and P0.7 (pin 3), but on this board
+those pins are used for the current shunt ADC and voltage divider ADC.
+For serial communication, use **UART1** on the programming header pads:
+UART1_TX = P1.6 (pin 8, header "P"), UART1_RX = P0.2 (pin 18, header "S").
 
 ## Features
 

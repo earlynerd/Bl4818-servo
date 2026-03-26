@@ -1,11 +1,11 @@
 # BL4818 Driver Board — Hardware Pinout & Notes
 
 > **Board:** XT48-12 V02 (silkscreen on stator side)
-> **Status:** Work in progress — fill in as you probe the board with a multimeter.
+> **Status:** Pin assignments CONFIRMED by multimeter probing.
 
 ## MCU: Nuvoton MS51FB9AE (TSSOP-20)
 
-From the official Nuvoton datasheet (Figure 4.1-1):
+From the official Nuvoton datasheet, with confirmed board connections:
 
 ```
                           ┌──────────┐
@@ -23,71 +23,54 @@ From the official Nuvoton datasheet (Figure 4.1-1):
                     P1.5     │    └──────────┘
 ```
 
-## Pin-by-Pin Worksheet
+## Confirmed Pin Assignments
 
-Fill in the "Board Connection" column as you trace each pin.
+| Pin | Port | Datasheet Functions                  | Board Connection              | Confirmed |
+|-----|------|--------------------------------------|-------------------------------|-----------|
+|  1  | P0.5 | T0 / PWM0_CH2 / ADC_CH4             | Tach output (via N-FET, inverted) | YES |
+|  2  | P0.6 | UART0_TXD / ADC_CH3                 | Current shunt (direct, no amp) | YES |
+|  3  | P0.7 | UART0_RXD / ADC_CH2                 | Battery voltage divider (10k/10k) | YES |
+|  4  | P2.0 | nRESET                               | Prog header "R" (reset)       | YES |
+|  5  | P3.0 | INT0 / OSCIN / ADC_CH1              | **Hall sensor 3**             | YES |
+|  6  | P1.7 | INT1 / ADC_CH0                       | **Hall sensor 2**             | YES |
+|  7  | VSS  | Ground                               | GND                          | YES |
+|  8  | P1.6 | ICE_DAT / UART1_TXD / [I2C0_SDA]   | Prog header "P" (ICE_DAT)    | YES |
+|  9  | VDD  | Power (2.4–5.5V)                     | **5V** from onboard regulator | YES |
+| 10  | P1.5 | SPI0_SS / PWM0_CH5                   | **Hall sensor 1**             | YES |
+| 11  | P1.4 | PWM0_BRAKE / PWM0_CH1 / I2C0_SDA   | **Direction input**           | YES |
+| 12  | P1.3 | I2C0_SCL / [STADC]                   | Possibly NC                  | YES |
+| 13  | P1.2 | **PWM0_CH0** / IC0                   | **Phase U low-side gate**     | YES |
+| 14  | P1.1 | ADC_CH7 / **PWM0_CH1** / IC1 / CLKO | **Phase U high-side gate**    | YES |
+| 15  | P1.0 | **PWM0_CH2** / IC2 / SPI0_CLK       | **Phase V high-side gate**    | YES |
+| 16  | P0.0 | **PWM0_CH3** / IC3 / SPI0_MOSI / T1 | **Phase V low-side gate**     | YES |
+| 17  | P0.1 | **PWM0_CH4** / IC4 / SPI0_MISO      | **Phase W low-side gate**     | YES |
+| 18  | P0.2 | ICE_CLK / UART1_RXD / [I2C0_SCL]    | Prog header "S" (ICE_CLK)    | YES |
+| 19  | P0.3 | ADC_CH6 / **PWM0_CH5** / IC5        | **Phase W high-side gate**    | YES |
+| 20  | P0.4 | ADC_CH5 / PWM0_CH3 / IC3 / STADC    | PWM speed input (no RC filter, unpop) | YES |
 
-| Pin | Port | Datasheet Functions                              | Board Connection | Notes |
-|-----|------|--------------------------------------------------|------------------|-------|
-|  1  | P0.5 | IC6 / T0 / **PWM0_CH2** / ADC_CH4               |                  |       |
-|  2  | P0.6 | **UART0_TXD** / ADC_CH3                          |                  |       |
-|  3  | P0.7 | **UART0_RXD** / ADC_CH2                          |                  |       |
-|  4  | P2.0 | **nRESET**                                       |                  | Prog header "R" |
-|  5  | P3.0 | INT0 / OSCIN / ADC_CH1                           |                  |       |
-|  6  | P1.7 | INT1 / **ADC_CH0**                               |                  |       |
-|  7  | VSS  | **Ground**                                       | GND              | Confirmed |
-|  8  | P1.6 | [I2C0_SDA] / UART1_TXD / **ICE_DAT**            |                  | Prog header "P" |
-|  9  | VDD  | **Power (2.4–5.5V)**                             | VDD              | Confirmed. 3.3V or 5V? |
-| 10  | P1.5 | IC7 / SPI0_SS / **PWM0_CH5**                     |                  |       |
-| 11  | P1.4 | I2C0_SDA / **PWM0_BRAKE** / PWM0_CH1             |                  | HW fault brake! |
-| 12  | P1.3 | I2C0_SCL / [STADC]                               |                  |       |
-| 13  | P1.2 | **PWM0_CH0** / IC0                               |                  |       |
-| 14  | P1.1 | ADC_CH7 / **PWM0_CH1** / IC1 / CLKO             |                  |       |
-| 15  | P1.0 | **PWM0_CH2** / IC2 / SPI0_CLK                    |                  |       |
-| 16  | P0.0 | **PWM0_CH3** / IC3 / SPI0_MOSI / T1             |                  |       |
-| 17  | P0.1 | **PWM0_CH4** / IC4 / SPI0_MISO                   |                  |       |
-| 18  | P0.2 | **ICE_CLK** / UART1_RXD / [I2C0_SCL]             |                  | Prog header "S" |
-| 19  | P0.3 | ADC_CH6 / **PWM0_CH5** / IC5                     |                  |       |
-| 20  | P0.4 | ADC_CH5 / **PWM0_CH3** / IC3 / STADC             |                  |       |
+## Three-Phase Bridge — CONFIRMED
 
-### PWM Channel Summary
+All 6 gate pins map to hardware PWM channels:
 
-The MS51FB9AE has 6 PWM channels. Each can be mapped to multiple pins:
+| Phase | High-side Pin    | High PWM Ch | Low-side Pin     | Low PWM Ch  |
+|-------|------------------|-------------|------------------|-------------|
+| **U** | P1.1 (pin 14)   | PWM0_CH1    | P1.2 (pin 13)   | PWM0_CH0    |
+| **V** | P1.0 (pin 15)   | PWM0_CH2    | P0.0 (pin 16)   | PWM0_CH3    |
+| **W** | P0.3 (pin 19)   | PWM0_CH5    | P0.1 (pin 17)   | PWM0_CH4    |
 
-| PWM Channel | Available Pins              | Likely Use           |
-|-------------|----------------------------|----------------------|
-| PWM0_CH0    | P1.2 (pin 13)             | Bridge gate          |
-| PWM0_CH1    | P1.1 (pin 14), P1.4 (pin 11) | Bridge gate      |
-| PWM0_CH2    | P0.5 (pin 1), P1.0 (pin 15)  | Bridge gate      |
-| PWM0_CH3    | P0.0 (pin 16), P0.4 (pin 20) | Bridge gate      |
-| PWM0_CH4    | P0.1 (pin 17)             | Bridge gate          |
-| PWM0_CH5    | P1.5 (pin 10), P0.3 (pin 19) | Bridge gate      |
-| PWM0_BRAKE  | P1.4 (pin 11)             | Overcurrent shutdown |
+All gate drives are **active-high** from the MCU.
 
-### ADC Channel Summary
-
-| ADC Channel | Pin              | Likely Use           |
-|-------------|------------------|----------------------|
-| ADC_CH0     | P1.7 (pin 6)    |                      |
-| ADC_CH1     | P3.0 (pin 5)    |                      |
-| ADC_CH2     | P0.7 (pin 3)    |                      |
-| ADC_CH3     | P0.6 (pin 2)    |                      |
-| ADC_CH4     | P0.5 (pin 1)    |                      |
-| ADC_CH5     | P0.4 (pin 20)   |                      |
-| ADC_CH6     | P0.3 (pin 19)   |                      |
-| ADC_CH7     | P1.1 (pin 14)   |                      |
-
-## Gate Drive Topology
+## Gate Drive Topology — CONFIRMED
 
 Complementary half-bridge per phase: **P-channel high-side + N-channel low-side**
-in a single 4-pin + tab package. All outputs are **active-high** from the MCU.
+in a single 4-pin + tab package. Tab = phase output (U/V/W).
 
 ```
-                    VCC_MOTOR
+                    VCC_MOTOR (12V)
                        │
                   ┌────┴────┐
                   │ High-side│
-                  │  P-ch    │──── Gate ◄── pulled up to VCC_MOTOR via resistor
+                  │  P-ch    │──── Gate ◄── pulled up to VCC via R
                   └────┬────┘                    │
                        │                    ┌────┴────┐
                        │                    │ Small   │
@@ -107,89 +90,86 @@ in a single 4-pin + tab package. All outputs are **active-high** from the MCU.
                     GND (via shunt)          GND
 ```
 
-**How it works (all active-high from MCU):**
-- **Low-side ON:** MCU pin HIGH → gate resistor → N-ch gate HIGH → N-ch conducts
-- **High-side ON:** MCU pin HIGH → small N-FET gate HIGH → N-FET conducts →
-  pulls P-ch gate to GND → P-ch conducts (P-FET turns on with low gate)
-- **Both OFF:** MCU pin LOW → low-side N-ch off; small N-FET off →
-  P-ch gate pulled up to VCC by resistor → P-ch off
+**All active-high from MCU:** MCU HIGH = FET ON (for both high and low sides).
 
-No inversion from the MCU's perspective.
+## Hall Sensors — CONFIRMED
 
-### Confirm by probing:
+| Sensor   | MCU Pin         | MCU Features        |
+|----------|-----------------|---------------------|
+| Hall 1   | P1.5 (pin 10)  | SPI0_SS / PWM0_CH5  |
+| Hall 2   | P1.7 (pin 6)   | INT1 / ADC_CH0      |
+| Hall 3   | P3.0 (pin 5)   | INT0 / ADC_CH1      |
 
-- [ ] What package are the 3 complementary MOSFET pairs? (4-pin + tab)
-- [ ] Can you read the part marking? _______________
-- [ ] Confirm P-ch high-side / N-ch low-side by checking tab to VCC vs GND
-- [ ] Confirm small N-FETs (likely SOT-23) — one per phase near the main FET
+Note: Hall 2 has INT1, Hall 3 has INT0 — hardware interrupt support for
+fast commutation updates on those two channels.
 
-### Package identification help
+## Current Sensing — CONFIRMED
 
-Common complementary MOSFET packages (N+P pair, 4-pin + tab):
-- **SO-8:** e.g., AO4606 (N+P, 30V), AO4616 (N+P, 30V)
-- **SOP-8 / TSSOP-8:** various Chinese dual complementary parts
-- **DFN / PDFN:** compact dual complementary
+- **Shunt:** Single low-side, direct connection to MCU (NO op-amp amplifier)
+- **ADC pin:** P0.6 (pin 2) = **ADC_CH3**
+- **ADC reference:** VDD = **5.0V**
+- **Shunt resistance:** ___ mΩ (read marking or measure)
 
-> Note the part marking on the MOSFET package if readable: _______________
+With no amplifier, the ADC reads the raw shunt voltage:
+```
+V_adc = I_motor × R_shunt
+ADC_val = V_adc / 5.0 × 4096
 
-## Three-Phase Bridge
+I_mA = ADC_val × 5000 / (4096 × R_shunt_ohm)
+```
 
-6 gate drive signals needed (high + low for each of U, V, W).
-Pins with PWM capability on the right side (pins 10-17) are prime candidates.
+For a typical 50mΩ shunt:
+- 1A → 50mV → ADC reading 41
+- 5A → 250mV → ADC reading 205
+- Resolution is coarse without amplification (~12mA per LSB at 50mΩ)
 
-| Phase | MOSFET Pkg | High-side MCU Pin | Low-side MCU Pin | Confirmed? |
-|-------|-----------|-------------------|------------------|------------|
-| U     |           |                   |                  | [ ]        |
-| V     |           |                   |                  | [ ]        |
-| W     |           |                   |                  | [ ]        |
+> TODO: Measure or read shunt resistance value
 
-## High-Side Gate Drive N-FETs
+## Battery Voltage — CONFIRMED
 
-| Phase | Small N-FET Package | MCU Pin (gate input) | Confirmed? |
-|-------|--------------------|-----------------------|------------|
-| U     |                    |                       | [ ]        |
-| V     |                    |                       | [ ]        |
-| W     |                    |                       | [ ]        |
+- **Voltage divider:** 10k / 10k (2:1 ratio)
+- **ADC pin:** P0.7 (pin 3) = **ADC_CH2**
+- **ADC reference:** VDD = **5.0V**
 
-## Hall Sensors
+```
+V_battery = ADC_val / 4096 × 5.0 × 2
+```
 
-| Sensor | Wire Color | MCU Pin | Confirmed? |
-|--------|-----------|---------|------------|
-| Hall A |           |         | [ ]        |
-| Hall B |           |         | [ ]        |
-| Hall C |           |         | [ ]        |
+At 12.6V (fully charged 3S): divider output = 6.3V → clamps at 5V (ADC reads 4095).
+At 12.0V: divider output = 6.0V → still clamps.
+At 10.0V: divider output = 5.0V → ADC reads 4095.
+At 9.0V: divider output = 4.5V → ADC reads 3686.
 
-## Current Shunt
+**Note:** With a 10k/10k divider and 5V VDD, the divider only gives useful
+readings below ~10V. Above that it's clipped. This is marginal for 12V operation.
+May only be useful for low-battery detection.
 
-Single low-side shunt (confirmed by inspection).
+## Tach Output — CONFIRMED
 
-- [ ] Shunt resistor location: between bridge ground and battery negative?
-- [ ] Shunt resistance value: ___ mΩ (read marking or measure)
-- [ ] Amplifier circuit: op-amp? direct to ADC pin?
-- [ ] ADC pin for shunt voltage: ___
+- **Pin:** P0.5 (pin 1)
+- **Type:** Open-drain via external N-FET (inverted logic)
+- MCU HIGH → N-FET on → tach output pulled low
+- MCU LOW → N-FET off → tach output pulled high (by external pull-up)
 
-## Control Inputs / Outputs
+## Control Inputs — CONFIRMED
 
-| Signal      | Connector Pin | MCU Pin | Type          | Notes |
-|-------------|--------------|---------|---------------|-------|
-| PWM input   |              |         | Input         | Speed control |
-| Direction   |              |         | Input (logic) |       |
-| Enable      |              |         | Input (logic) |       |
-| LED         |              |         | Output        |       |
-| VCC (logic) |              |         | Power         | 3.3V or 5V? |
-| GND         |              |         | Power         |       |
+| Signal     | MCU Pin         | Type         | Notes                           |
+|------------|-----------------|--------------|----------------------------------|
+| Direction  | P1.4 (pin 11)  | Digital input | Also has PWM0_BRAKE function    |
+| PWM input  | P0.4 (pin 20)  | Analog/PWM   | Unpopulated RC filter footprint |
+| Tach out   | P0.5 (pin 1)   | Output (inv) | Via external N-FET              |
 
-## Programming Header
+## Programming Header — CONFIRMED
 
 Silkscreen labels: **P, R, S, +, −**
 
-| Pad | Label | Signal    | MCU Pin            | Confirmed? |
-|-----|-------|-----------|--------------------|------------|
-|     | +     | VDD       | Pin 9 (VDD)        | [ ]        |
-|     | −     | GND       | Pin 7 (VSS)        | [ ]        |
-|     | R     | nRESET    | Pin 4 (P2.0)       | [ ]        |
-|     | P     | ICE_DAT   | Pin 8 (P1.6)       | [ ]        |
-|     | S     | ICE_CLK   | Pin 18 (P0.2)      | [ ]        |
+| Label | Signal    | MCU Pin            |
+|-------|-----------|--------------------|
+| +     | VDD       | Pin 9 (5V)         |
+| −     | GND       | Pin 7 (VSS)        |
+| R     | nRESET    | Pin 4 (P2.0)       |
+| P     | ICE_DAT   | Pin 8 (P1.6)       |
+| S     | ICE_CLK   | Pin 18 (P0.2)      |
 
 ### Nu-Link Connection
 
@@ -201,22 +181,27 @@ Silkscreen labels: **P, R, S, +, −**
 | ICE_DAT     | P           |
 | ICE_CLK     | S           |
 
-## Power Supply
+## Power Supply — CONFIRMED
 
-- [x] Motor voltage: 12V (XT48-12 designation)
-- [ ] Logic voltage: ___ V (MCU VDD — likely 3.3V or 5V from onboard regulator)
-- [ ] Regulator type/part: ___ (LDO? SOT-23-5?)
+- Motor voltage: **12V** (XT48-12 designation)
+- Logic voltage: **5V** (onboard regulator → MCU VDD)
+- Regulator type/part: ___ (TBD — read marking)
 
-## Probing Tips
+## Available Pins for Expansion
 
-1. **Power first:** Confirm VDD (pin 9) and VSS (pin 7) — already confirmed connected to power. Measure VDD voltage with board powered to determine 3.3V vs 5V logic.
-2. **Programming header:** Confirm continuity: "P" pad → pin 8 (ICE_DAT), "S" pad → pin 18 (ICE_CLK), "R" pad → pin 4 (nRESET). This lets you connect the Nu-Link immediately.
-3. **Gate outputs:** With power off, check continuity from pins on the right side of the MCU (pins 10-17: P1.5, P1.4, P1.3, P1.2, P1.1, P1.0, P0.0, P0.1) to the gate resistors on the MOSFETs. Also check pin 1 (P0.5) and pins 19-20 (P0.3, P0.4). These PWM-capable pins drive the bridge.
-4. **PWM0_BRAKE:** Pin 11 (P1.4) has hardware fault brake — may be wired to the current sense comparator for fast overcurrent shutdown.
-5. **Hall sensors:** Trace the 3 wires from the motor's hall sensor cable. Look for pins NOT used by PWM — candidates: pin 5 (P3.0), pin 6 (P1.7), pin 12 (P1.3), or pins on the left side (P0.5-P0.7).
-6. **Current shunt:** Find the sense resistor and trace to an ADC-capable pin. ADC channels available on: P1.7 (pin 6), P3.0 (pin 5), P0.7 (pin 3), P0.6 (pin 2), P0.5 (pin 1), P0.4 (pin 20), P0.3 (pin 19), P1.1 (pin 14).
-7. **UART:** If you want serial debug, P0.6 (pin 2) = UART0_TX, P0.7 (pin 3) = UART0_RX. Check if these are used for anything else on the board.
+| Pin | Port | Current Use        | Available For           |
+|-----|------|--------------------|-------------------------|
+| 12  | P1.3 | Possibly NC        | Encoder A, GPIO, I2C_SCL |
+| 11  | P1.4 | Direction input    | Could repurpose for encoder or PWM_BRAKE |
+| 20  | P0.4 | PWM input          | Could repurpose for encoder B |
+| 1   | P0.5 | Tach output        | Could repurpose                |
+| 2   | P0.6 | Current shunt ADC  | Shared: UART0_TX (if shunt moved) |
+| 3   | P0.7 | Voltage divider ADC| Shared: UART0_RX (if divider disconnected) |
 
-## Board Photos
+**For servo mode (encoder + UART):**
+- Encoder A → P1.3 (pin 12, currently NC)
+- Encoder B → P0.4 (pin 20, repurpose PWM input)
+- UART TX → P0.6 (pin 2, sacrifice current sense — or use UART1 on P1.6/P0.2 via programming header)
+- UART RX → P0.7 (pin 3, sacrifice voltage sense)
 
-> Add photos here or link to them — top side, bottom side, close-up of MCU area.
+Or use UART1 on the programming header pads (P=TX, S=RX) to keep ADC.

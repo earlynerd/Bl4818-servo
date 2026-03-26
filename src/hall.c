@@ -3,7 +3,14 @@
  *
  * Reads three hall sensors and tracks rotor position via state transitions.
  *
- * Hall encoding (3 bits: CBA):
+ * Confirmed pin assignments:
+ *   Hall 1 = P1.5 (pin 10)
+ *   Hall 2 = P1.7 (pin 6)  — has INT1
+ *   Hall 3 = P3.0 (pin 5)  — has INT0
+ *
+ * Halls are on different ports — must read individually.
+ *
+ * Hall encoding (3 bits: hall3:hall2:hall1):
  *   State 1: 001  (0° electrical)
  *   State 3: 011  (60°)
  *   State 2: 010  (120°)
@@ -13,8 +20,8 @@
  *
  * States 0 and 7 are invalid (all same = sensor fault).
  *
- * Pin assignments are provisional — update HALL_x_PIN in ms51_config.h
- * after probing the board. Halls may be on different ports (not all on P1).
+ * NOTE: The actual hall sequence depends on motor wiring. The commutation
+ * table may need to be rotated after first power-up test.
  */
 
 #include "ms51_reg.h"
@@ -53,23 +60,17 @@ static uint16_t last_transition_time;
 
 void hall_init(void)
 {
-    /*
-     * Configure hall sensor pins as inputs.
-     * Since halls may be on different ports, configure each individually.
-     * Pin mode: Px_M1=1, Px_M2=0 → input mode.
-     *
-     * TODO: Update these when actual hall pin assignments are confirmed.
-     */
+    /* Configure hall sensor pins as inputs (confirmed assignments) */
 
-    /* Hall A = P0.5 (pin 1) — configure as input */
-    P0M1 |=  0x20;   /* P0.5 M1=1 */
-    P0M2 &= ~0x20;   /* P0.5 M2=0 */
+    /* Hall 1 = P1.5 (pin 10) — configure as input */
+    P1M1 |=  0x20;   /* P1.5 M1=1 */
+    P1M2 &= ~0x20;   /* P1.5 M2=0 */
 
-    /* Hall B = P1.7 (pin 6) — configure as input */
+    /* Hall 2 = P1.7 (pin 6) — configure as input (has INT1) */
     P1M1 |=  0x80;   /* P1.7 M1=1 */
     P1M2 &= ~0x80;   /* P1.7 M2=0 */
 
-    /* Hall C = P3.0 (pin 5) — configure as input */
+    /* Hall 3 = P3.0 (pin 5) — configure as input (has INT0) */
     P3M1 |=  0x01;   /* P3.0 M1=1 */
     P3M2 &= ~0x01;   /* P3.0 M2=0 */
 
