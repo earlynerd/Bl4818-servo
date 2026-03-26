@@ -42,6 +42,9 @@ void N51PGM_set_rst(uint8_t val);
 // Set the PGM clock pin to the given value.
 void N51PGM_set_clk(uint8_t val);
 
+// Control switched target power, if implemented by the bridge.
+void N51PGM_set_target_power(uint8_t on);
+
 // Sets the PGM trigger pin to the given value. (Optionally implemented, for fault injection purposes)
 void N51PGM_set_trigger(uint8_t val);
 

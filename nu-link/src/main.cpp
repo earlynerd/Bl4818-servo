@@ -14,7 +14,7 @@
 
 Adafruit_USBD_CDC DebugSerial;
 
-#define FW_VERSION          0xE0  // Our own special firmware version to tell our ISP tool we can use our custom commands
+#define FW_VERSION          0xE1  // Bridge FW with target-power recovery commands
 
 // We refuse to set configs that have the reset pin disabled and the watchdog timer disabled
 // It becomes very, very difficult to re-flash the device if the reset pin is disabled AND it doesn't reset on a periodic basis
@@ -102,6 +102,9 @@ bool read_buff_valid = false;
 void read_config(config_flags *flags);
 void fail_pkt();
 int get_ldrom_size(config_flags *flags);
+static bool is_unsynced_cmd(int cmd);
+static void write_u32_to_tx(uint32_t value);
+static bool enter_icp_after_power_cycle(uint16_t off_ms, uint16_t delay_us);
 
 
 #ifdef _DEBUG
@@ -198,6 +201,7 @@ void setup()
   delay(100);
   DebugSerial.println("Debug port output prints below...");
   pinMode(BUILTIN_LED, OUTPUT);
+  N51PGM_set_target_power(1);
   disable_connect_led();
   state = DISCONNECTED_STATE;
   memset(rx_buf, (uint8_t)0xFF, PACKSIZE);
@@ -440,6 +444,8 @@ const char * cmd_enum_to_string(int cmd)
     case CMD_GET_UCID: return "CMD_GET_UCID";
     case CMD_ISP_PAGE_ERASE: return "CMD_ISP_PAGE_ERASE";
     case CMD_ISP_MASS_ERASE: return "CMD_ISP_MASS_ERASE";
+    case CMD_TARGET_POWER: return "CMD_TARGET_POWER";
+    case CMD_POWER_CYCLE_CONNECT: return "CMD_POWER_CYCLE_CONNECT";
     default: return "UNKNOWN";
   }
 }
@@ -473,6 +479,33 @@ bool mass_erase_checked(bool check_device_id = false){
     }
   }
   return true;
+}
+
+static bool is_unsynced_cmd(int cmd) {
+  return cmd == CMD_CONNECT || cmd == CMD_POWER_CYCLE_CONNECT || cmd == CMD_TARGET_POWER;
+}
+
+static void write_u32_to_tx(uint32_t value) {
+  tx_buf[8] = value & 0xff;
+  tx_buf[9] = (value >> 8) & 0xff;
+  tx_buf[10] = (value >> 16) & 0xff;
+  tx_buf[11] = (value >> 24) & 0xff;
+}
+
+static bool enter_icp_after_power_cycle(uint16_t off_ms, uint16_t delay_us) {
+  N51ICP_deinit(0);
+  N51PGM_set_target_power(0);
+  delay(off_ms);
+  N51PGM_set_target_power(1);
+
+  if (N51ICP_init() != 0) {
+    DEBUG_PRINT("Failed to initialize the PGM after power cycle\n");
+    return false;
+  }
+
+  saved_device_id = N51ICP_enter_icp_after_powerup(delay_us);
+  DEBUG_PRINT("Power-cycle connect device ID: 0x%04lx\n", saved_device_id);
+  return get_flash_info(saved_device_id) != NULL;
 }
 
 
@@ -553,7 +586,7 @@ void loop()
     int tmp = Serial.read();
     rx_buf[rx_bufhead++] = tmp;
     if (state == DISCONNECTED_STATE) {
-      if (tmp != CMD_CONNECT){
+      if (!is_unsynced_cmd(tmp)){
         DEBUG_PRINT("NOCONN: %d\n", tmp);
         reset_buf();
         return;
@@ -598,7 +631,7 @@ void loop()
     DEBUG_PRINT("received %d-byte packet, %s (0x%02x), seqno 0x%04x, checksum 0x%04x\n", PACKSIZE, cmd_enum_to_string(cmd), cmd, seqno, get_checksum());
 
 #if CHECK_SEQUENCE_NO
-    if (g_packno != seqno && cmd != CMD_SYNC_PACKNO && cmd != CMD_CONNECT)
+    if (g_packno != seqno && cmd != CMD_SYNC_PACKNO && !is_unsynced_cmd(cmd))
     {
       DEBUG_PRINT("seqno mismatch, expected 0x%04x, got 0x%04x, ignoring packet...\n", g_packno, seqno);
       state = COMMAND_STATE;
@@ -606,7 +639,7 @@ void loop()
       return;
     }
 #endif
-    if (state == WAITING_FOR_SYNCNO && cmd != CMD_SYNC_PACKNO && cmd != CMD_CONNECT) {
+    if (state == WAITING_FOR_SYNCNO && cmd != CMD_SYNC_PACKNO && !is_unsynced_cmd(cmd)) {
       // No syncno command, just skip to command state
       state = COMMAND_STATE;
     } else if ((state == DUMPING_STATE || state == UPDATING_STATE) && cmd != CMD_FORMAT2_CONTINUATION) {
@@ -636,18 +669,63 @@ void loop()
             state = WAITING_FOR_SYNCNO;
             if (N51ICP_init() != 0) {
               DEBUG_PRINT("Failed to initialize the PGM\n");
+              state = DISCONNECTED_STATE;
               fail_pkt();
               return;
             }
-            N51ICP_enter_icp_mode(true);
+            saved_device_id = N51ICP_enter_icp_mode(true);
             enable_connect_led();
           } else if (state == WAITING_FOR_SYNCNO) {
             // Don't send back a packet if we just connected and are waiting for syncno
             // It means that we got multiple connect commands, we only need to respond to one of them
             break;
           }
+          write_u32_to_tx(saved_device_id);
+          memset(&tx_buf[12], 0, PACKSIZE - 12);
           send_pkt();
           DEBUG_PRINT("Connected!\n");
+        } break;
+      case CMD_POWER_CYCLE_CONNECT:
+        {
+          g_packno = 0;
+          uint16_t off_ms = rx_buf[8] | (rx_buf[9] << 8);
+          uint16_t delay_us = rx_buf[10] | (rx_buf[11] << 8);
+          DEBUG_PRINT("CMD_POWER_CYCLE_CONNECT (off_ms=%u, delay_us=%u)\n", off_ms, delay_us);
+          INVALIDATE_CACHE;
+          if (state == WAITING_FOR_CONNECT_CMD) {
+            state = WAITING_FOR_SYNCNO;
+            if (!enter_icp_after_power_cycle(off_ms, delay_us)) {
+              DEBUG_PRINT("Power-cycle connect failed\n");
+              state = DISCONNECTED_STATE;
+              fail_pkt();
+              return;
+            }
+            enable_connect_led();
+          } else if (state == WAITING_FOR_SYNCNO) {
+            break;
+          }
+          write_u32_to_tx(saved_device_id);
+          memset(&tx_buf[12], 0, PACKSIZE - 12);
+          send_pkt();
+          DEBUG_PRINT("Connected!\n");
+        } break;
+      case CMD_TARGET_POWER:
+        {
+          uint8_t power_on = rx_buf[8] ? 1 : 0;
+          DEBUG_PRINT("CMD_TARGET_POWER (%s)\n", power_on ? "on" : "off");
+          if (!power_on && state > WAITING_FOR_CONNECT_CMD) {
+            disable_connect_led();
+            N51ICP_deinit(0);
+          }
+          N51PGM_set_target_power(power_on);
+          if (!power_on || state < WAITING_FOR_SYNCNO) {
+            state = DISCONNECTED_STATE;
+          }
+          tx_buf[8] = power_on;
+          tx_buf[9] = 0;
+          tx_buf[10] = 0;
+          tx_buf[11] = 0;
+          send_pkt();
         } break;
       case CMD_GET_FWVER:
         tx_buf[8] = FW_VERSION;

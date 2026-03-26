@@ -29,6 +29,8 @@
 // Arduino ISP-to-ICP bridge only
 #define CMD_UPDATE_WHOLE_ROM     0xE1 // non-official
 #define CMD_ISP_MASS_ERASE       0xD6 // non-official
+#define CMD_TARGET_POWER         0xD7 // non-official
+#define CMD_POWER_CYCLE_CONNECT  0xD8 // non-official
 
 // ** Unsupported by N76E003 **
 // Dataflash commands (when a chip has the ability to deliniate between data and program flash)

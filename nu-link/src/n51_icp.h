@@ -122,6 +122,14 @@ void N51ICP_set_mass_erase_time(uint32_t delay_us, uint32_t hold_us);
 uint32_t N51ICP_enter_icp_mode(uint8_t do_reset);
 
 /**
+ * @brief      Attempts ICP entry after a target power-up event without using the reset pin.
+ *
+ * @param delay_us Delay after target power is enabled before the ICP entry bits are sent.
+ * @return         The detected device ID
+ */
+uint32_t N51ICP_enter_icp_after_powerup(uint32_t delay_us);
+
+/**
  * @brief      Takes the target chip out of ICP mode.
 */
 void N51ICP_exit_icp_mode(void);

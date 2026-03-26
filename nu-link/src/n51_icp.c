@@ -204,6 +204,14 @@ uint32_t N51ICP_enter_icp_mode(uint8_t do_reset) {
 	return post_entry_set_times();
 }
 
+uint32_t N51ICP_enter_icp_after_powerup(uint32_t delay_us) {
+	DEBUG_PRINT("ICP: enter_icp_after_powerup (delay_us=%lu)\n", delay_us);
+	USLEEP(delay_us);
+	N51ICP_send_entry_bits();
+	USLEEP(10);
+	return post_entry_set_times();
+}
+
 void N51ICP_reentry(uint32_t delay1, uint32_t delay2, uint32_t delay3) {
 	USLEEP(10);
 	if (delay1 > 0) {

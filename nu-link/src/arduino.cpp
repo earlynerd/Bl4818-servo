@@ -7,22 +7,52 @@
 #define DAT   11
 #define CLK   12
 #define RST   13
+#define PWR   10
 #else
 #define DAT   52
 #define CLK   50
 #define RST   48
+#define PWR   46
+#endif
+
+#ifndef TARGET_POWER_ACTIVE_HIGH
+#define TARGET_POWER_ACTIVE_HIGH 1
+#endif
+
+#ifndef TARGET_POWER_DEFAULT_ON
+#define TARGET_POWER_DEFAULT_ON 1
 #endif
 extern Adafruit_USBD_CDC DebugSerial;
 extern "C" {
 
 static uint8_t initialized = 0;
+static uint8_t power_pin_initialized = 0;
+
+void N51PGM_release_pins(void);
+
+static void N51PGM_init_power_pin(void)
+{
+  if (power_pin_initialized) {
+    return;
+  }
+
+  pinMode(PWR, OUTPUT);
+#if TARGET_POWER_ACTIVE_HIGH
+  digitalWrite(PWR, TARGET_POWER_DEFAULT_ON ? HIGH : LOW);
+#else
+  digitalWrite(PWR, TARGET_POWER_DEFAULT_ON ? LOW : HIGH);
+#endif
+  power_pin_initialized = 1;
+}
 
 int N51PGM_init(void)
 {
+  N51PGM_init_power_pin();
   pinMode(CLK, OUTPUT);
   pinMode(DAT, INPUT);
   pinMode(RST, OUTPUT);
   digitalWrite(CLK, LOW);
+  digitalWrite(RST, LOW);
   initialized = 1;
 
   return 0;
@@ -51,6 +81,20 @@ void N51PGM_set_rst(uint8_t val)
 void N51PGM_set_clk(uint8_t val)
 {
   digitalWrite(CLK, val);
+}
+
+void N51PGM_set_target_power(uint8_t on)
+{
+  N51PGM_init_power_pin();
+  if (!on) {
+    N51PGM_release_pins();
+    initialized = 0;
+  }
+#if TARGET_POWER_ACTIVE_HIGH
+  digitalWrite(PWR, on ? HIGH : LOW);
+#else
+  digitalWrite(PWR, on ? LOW : HIGH);
+#endif
 }
 
 void N51PGM_dat_dir(uint8_t state)

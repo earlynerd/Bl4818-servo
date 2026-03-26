@@ -50,11 +50,14 @@ CMD_GET_CID           = 0xB3
 CMD_GET_PID           = 0xEB
 CMD_ISP_PAGE_ERASE    = 0xD5
 CMD_ISP_MASS_ERASE    = 0xD6
+CMD_TARGET_POWER      = 0xD7
+CMD_POWER_CYCLE_CONNECT = 0xD8
 CMD_FORMAT2_CONTINUATION = 0x00
 
 # Firmware version thresholds
 EXTENDED_CMDS_FW_VER = 0xD0
 ICP_BRIDGE_FW_VER    = 0xE0
+POWER_CTRL_FW_VER    = 0xE1
 
 # Timeouts (seconds)
 CONNECT_TIMEOUT  = 0.05
@@ -64,6 +67,10 @@ FORMAT2_TIMEOUT  = 0.2
 READ_ROM_TIMEOUT = 2.0
 RESET_TIMEOUT    = 0.5
 POLL_INTERVAL    = 0.01
+
+DEFAULT_POWER_OFF_MS = 50
+DEFAULT_RECOVERY_DELAYS_US = [100, 250, 500, 1000, 2000, 5000, 10000, 20000]
+SAFE_FACTORY_CONFIG = bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF])
 
 # MS51FB9AE specifics
 MS51FB9AE_DEVIDS = {0x4B20, 0x4B21}
@@ -102,6 +109,18 @@ def decode_ldrom_size_kb(config_bytes):
 def decode_aprom_size_bytes(config_bytes):
     return MS51FB9AE_FLASH_SIZE - (decode_ldrom_size_kb(config_bytes) * 1024)
 
+def is_safe_factory_config(config_bytes):
+    if len(config_bytes) != 5:
+        return False
+    c0, c1, _, _, _ = config_bytes
+    return (
+        config_bytes == SAFE_FACTORY_CONFIG and
+        (c0 & 0x80) and  # boot APROM
+        (c0 & 0x04) and  # keep reset pin enabled
+        (c0 & 0x02) and  # stay unlocked
+        ((c1 & 0x07) == 0x07)  # reserve no LDROM
+    )
+
 # ── ISP Programmer ──────────────────────────────────────────────────────────
 
 class ISPError(Exception):
@@ -118,6 +137,14 @@ class ISPProgrammer:
     def open(self):
         self.ser = serial.Serial(self.port, self.baudrate, timeout=0.1)
         self.ser.flush()
+
+    def require_icp_bridge(self, feature):
+        if self.fw_ver < ICP_BRIDGE_FW_VER:
+            raise ISPError(f"{feature} requires the custom ICP bridge firmware (FW >= 0x{ICP_BRIDGE_FW_VER:02X})")
+
+    def require_power_control(self, feature):
+        if self.fw_ver < POWER_CTRL_FW_VER:
+            raise ISPError(f"{feature} requires bridge FW >= 0x{POWER_CTRL_FW_VER:02X} with target power control")
 
     def close(self, run_aprom=True):
         if self.ser and self.ser.is_open:
@@ -161,6 +188,22 @@ class ISPProgrammer:
                 rx = combined[len(combined) - PACKSIZE:]
         return rx
 
+    def _send_bootstrap_cmd(self, cmd, data=b"", timeout=1.0, retries=5):
+        self.ser.reset_input_buffer()
+        self.ser.reset_output_buffer()
+        self.seq_num = 0
+        pkt = self._build_packet(cmd, data)
+
+        for attempt in range(retries):
+            self._send_raw(pkt)
+            rx = self._read_response(timeout)
+            if rx and len(rx) == PACKSIZE:
+                if unpack_u16(rx[0:2]) == calc_checksum(pkt):
+                    return rx
+            self.ser.flush()
+
+        raise ISPError(f"No valid response for bootstrap command 0x{cmd:02X} after {retries} attempts")
+
     def send_cmd(self, cmd, data=b"", timeout=None):
         """Send a command and receive the ACK. Returns the 64-byte response."""
         if timeout is None:
@@ -188,56 +231,56 @@ class ISPProgrammer:
 
     # ── Connection ──────────────────────────────────────────────────────
 
-    def connect(self):
-        """Establish ISP connection with the target."""
-        self.ser.reset_input_buffer()
-        self.ser.reset_output_buffer()
-        self.seq_num = 0
-
-        print(f"  Connecting on {self.port}...")
-        print("  (Reset the target board now, or the Pico bridge handles it)")
-
-        connected = False
-        for attempt in range(30):  # ~30 attempts
-            self.ser.reset_input_buffer()
-            self.seq_num = 0
-            pkt = self._build_packet(CMD_CONNECT)
-            self._send_raw(pkt)
-
-            # ICP entry on the bridge takes ~300ms (reset sequence + entry bits
-            # + device ID read), so wait long enough for it to complete
-            if not self._wait_for_data(1.0):
-                continue
-
-            rx = self.ser.read(self.ser.in_waiting)
-            if len(rx) < PACKSIZE:
-                continue
-            # Take last complete packet
-            rx = rx[len(rx) - PACKSIZE:]
-
-            rx_checksum = unpack_u16(rx[0:2])
-            tx_checksum = calc_checksum(pkt)
-            if rx_checksum == tx_checksum:
-                connected = True
-                break
-
-        if not connected:
-            raise ISPError("Could not connect to target. Check wiring and reset.")
-
-        # Sync packet number
+    def _finish_connect(self):
         self.seq_num = 0
         sync_data = pack_u32(1)
-        rx = self.send_cmd(CMD_SYNC_PACKNO, sync_data, timeout=1.0)
+        self.send_cmd(CMD_SYNC_PACKNO, sync_data, timeout=1.0)
 
-        # Get firmware version
         rx = self.send_cmd(CMD_GET_FWVER)
         self.fw_ver = rx[8]
         fw_type = ""
-        if self.fw_ver >= ICP_BRIDGE_FW_VER:
+        if self.fw_ver >= POWER_CTRL_FW_VER:
+            fw_type = " (ICP bridge + power control)"
+        elif self.fw_ver >= ICP_BRIDGE_FW_VER:
             fw_type = " (ICP bridge)"
         elif self.fw_ver >= EXTENDED_CMDS_FW_VER:
             fw_type = " (extended cmds)"
         print(f"  Connected! ISP FW version: 0x{self.fw_ver:02X}{fw_type}")
+
+    def connect(self):
+        """Establish ISP connection with the target."""
+        print(f"  Connecting on {self.port}...")
+        print("  (Reset the target board now, or the bridge handles it)")
+        self._send_bootstrap_cmd(CMD_CONNECT, timeout=1.0, retries=30)
+        self._finish_connect()
+
+    def connect_with_power_cycle(self, off_ms=DEFAULT_POWER_OFF_MS, delays_us=None):
+        """Attempt ISP connection by power-cycling the target and sweeping entry delays."""
+        if delays_us is None:
+            delays_us = DEFAULT_RECOVERY_DELAYS_US
+
+        print(f"  Recovery connect on {self.port} with target power control...")
+        for delay_us in delays_us:
+            print(f"  Trying power-cycle connect: off {off_ms} ms, entry delay {delay_us} us")
+            timeout = max(1.0, (off_ms / 1000.0) + 0.5)
+            data = pack_u16(off_ms) + pack_u16(delay_us)
+            try:
+                self._send_bootstrap_cmd(CMD_POWER_CYCLE_CONNECT, data=data, timeout=timeout, retries=2)
+                self._finish_connect()
+                print(f"  Recovery connect succeeded at {delay_us} us.")
+                return delay_us
+            except ISPError:
+                continue
+
+        raise ISPError("Could not connect using power-cycle recovery. Check VDD switch wiring and timing.")
+
+    def set_target_power(self, on):
+        """Turn switched target power on or off via the bridge and wait for the ACK."""
+        if self.fw_ver and self.fw_ver < POWER_CTRL_FW_VER:
+            self.require_power_control("Target power control")
+        state = 1 if on else 0
+        self._send_bootstrap_cmd(CMD_TARGET_POWER, bytes([state]), timeout=0.5, retries=3)
+        print(f"  Target power {'ON' if on else 'OFF'}.")
 
     # ── Device Info ─────────────────────────────────────────────────────
 
@@ -373,12 +416,32 @@ class ISPProgrammer:
 
     def write_config(self, config_bytes):
         """Write config bytes to device."""
+        self.require_icp_bridge("Config writes")
         if len(config_bytes) != 5:
             raise ISPError("Config write requires exactly 5 raw config bytes")
         # The Pico bridge expects the raw config bytes at packet offset 8.
         pkt_data = bytes(config_bytes)
         rx = self.send_cmd(CMD_UPDATE_CONFIG, pkt_data, timeout=ERASE_TIMEOUT)
         return rx
+
+    def write_safe_factory_config(self):
+        """Restore the known-safe factory config and verify it by readback."""
+        self.require_icp_bridge("Safe config restore")
+        new_config = SAFE_FACTORY_CONFIG
+        if not is_safe_factory_config(new_config):
+            raise ISPError("Internal error: safe factory config validation failed")
+
+        print("\n  Writing safe factory config: APROM boot, unlocked, full 16KB APROM")
+        old_config = self.read_config()
+        print(f"  Old config: [{' '.join(f'0x{b:02X}' for b in old_config)}]")
+        print(f"  New config: [{' '.join(f'0x{b:02X}' for b in new_config)}]")
+        self.write_config(new_config)
+        verify = self.read_config()
+        print(f"  Readback:   [{' '.join(f'0x{b:02X}' for b in verify)}]")
+        self._print_config(verify)
+        if verify[:5] != new_config[:5]:
+            raise ISPError("Config readback doesn't match safe factory config")
+        print("  Config write verified OK.")
 
     # ── Flash Operations ────────────────────────────────────────────────
 
@@ -543,6 +606,16 @@ def main():
         help="Erase APROM only (preserves LDROM/config on the custom bridge)")
     parser.add_argument("--chip-erase", action="store_true",
         help="Full-chip erase via the custom bridge (erases APROM, LDROM, and config)")
+    parser.add_argument("--recover", action="store_true",
+        help="Recover a bricked target: power-cycle connect, full-chip erase, restore safe config, then exit")
+    parser.add_argument("--power-cycle-connect", action="store_true",
+        help="If normal connect fails, try recovery connect using switched target power")
+    parser.add_argument("--power-off-ms", type=int, default=DEFAULT_POWER_OFF_MS,
+        help=f"Target power-off time for recovery connect (default: {DEFAULT_POWER_OFF_MS} ms)")
+    parser.add_argument("--power-on-delay-us", type=int, action="append",
+        help="Power-up delay before sending ICP entry bits during recovery; repeat to sweep multiple values")
+    parser.add_argument("--target-power", choices=("on", "off"),
+        help="Switch target VDD through the bridge and exit")
     args = parser.parse_args()
 
     # Resolve port
@@ -559,7 +632,20 @@ def main():
 
     try:
         prog.open()
-        prog.connect()
+        recovery_delays = args.power_on_delay_us or DEFAULT_RECOVERY_DELAYS_US
+
+        if args.target_power:
+            prog.set_target_power(args.target_power == "on")
+            return 0
+
+        try:
+            prog.connect()
+        except ISPError:
+            if not (args.power_cycle_connect or args.recover):
+                raise
+            print("  Normal connect failed; trying power-cycle recovery...")
+            prog.connect_with_power_cycle(args.power_off_ms, recovery_delays)
+
         prog.print_device_info()
 
         # Warn if device ID doesn't match MS51FB9AE
@@ -575,6 +661,18 @@ def main():
             if not args.write_config and args.info:
                 return 0
 
+        if args.recover:
+            if not args.chip_erase:
+                prog.chip_erase()
+                prog.print_device_info()
+            if dev_id not in MS51FB9AE_DEVIDS:
+                print(f"ERROR: refusing to write config to unknown device 0x{dev_id:04X}")
+                return 1
+            print("\n  Restoring safe factory config after recovery")
+            prog.write_safe_factory_config()
+            run_aprom_on_close = True
+            return 0
+
         if args.erase:
             prog.erase_all()
             # Re-read device info after erase
@@ -587,21 +685,8 @@ def main():
             if dev_id not in MS51FB9AE_DEVIDS:
                 print(f"ERROR: refusing to write config to unknown device 0x{dev_id:04X}")
                 return 1
-            # Factory defaults: APROM boot, unlocked, no LDROM, BOD off, WDT stopped
-            new_config = bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF])
-            print("\n  Writing config: APROM boot, unlocked, full 16KB APROM")
-            old_config = prog.read_config()
-            print(f"  Old config: [{' '.join(f'0x{b:02X}' for b in old_config)}]")
-            print(f"  New config: [{' '.join(f'0x{b:02X}' for b in new_config)}]")
-            prog.write_config(new_config)
-            verify = prog.read_config()
-            print(f"  Readback:   [{' '.join(f'0x{b:02X}' for b in verify)}]")
-            if verify[:5] == new_config[:5]:
-                print("  Config write verified OK.")
-                run_aprom_on_close = True
-            else:
-                print("  WARNING: Config readback doesn't match!")
-                return 1
+            prog.write_safe_factory_config()
+            run_aprom_on_close = True
 
         if args.info:
             run_aprom_on_close = True
