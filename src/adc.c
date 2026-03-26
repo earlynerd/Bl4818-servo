@@ -6,6 +6,13 @@
  * Confirmed channel assignments:
  *   ADC_CH3 (P0.6, pin 2) = Current shunt — direct, NO amplifier
  *   ADC_CH2 (P0.7, pin 3) = Battery voltage — 10k/10k divider (2:1)
+ *
+ * Register layout (from BSP):
+ *   ADCCON0 (E8H): ADCF|ADCS|ETGSEL1:0|ADCHS3:0
+ *   ADCCON1 (E1H): -|STADCPX|ADCDIV1:0|ETGTYP1:0|ADCEX|ADCEN
+ *   ADCCON2 (E2H): ADFBEN|ADCMPOP|ADCMPEN|ADCMPO|ADCAQT2:0|ADCDLY.8
+ *   ADCRH   (C3H): ADC result bits [11:4]
+ *   ADCRL   (C2H): ADC result bits [3:0] in upper nibble [7:4]
  */
 
 #include "ms51_reg.h"
@@ -14,48 +21,50 @@
 
 void adc_init(void)
 {
-    /* Configure P0.6 (ADC_CH3) and P0.7 (ADC_CH2) as analog inputs */
+    /* Configure P0.6 (ADC_CH3) and P0.7 (ADC_CH2) as inputs */
     P0M1 |=  0xC0;  /* P0.6, P0.7 input mode (M1=1) */
     P0M2 &= ~0xC0;  /* (M2=0) */
 
     /*
-     * ADCCON0: ADC control register 0
-     *   Bit 7: ADCEN = 1 (enable ADC)
-     *   Bit 6: ADCI  = 0 (clear interrupt flag)
-     *   Bit 5: ADCS  = 0 (don't start conversion yet)
-     *   Bit 3-0: CHS[3:0] = channel select
+     * Disable digital input buffer on ADC pins to reduce noise.
+     * AINDIDS: bit=0 enables analog, bit=1 keeps digital.
+     * Clear bits for channels we use as analog inputs.
      */
-    ADCCON0 = 0x80;  /* Enable ADC, no conversion yet */
+    AINDIDS &= ~0x0C;   /* Clear bits 3,2 for ADC_CH3(P0.6), ADC_CH2(P0.7) */
 
     /*
-     * ADCCON1: ADC control register 1
-     *   Bit 4-3: ADCDIV = clock divider
-     *   For 12-bit at 24MHz, use divider for reasonable conversion time.
+     * ADCCON1: ADC configuration
+     *   Bit 5:4 = ADCDIV = 01 (FSYS/2 = 12 MHz ADC clock)
+     *   Bit 1   = ADCEX = 0 (software trigger only)
+     *   Bit 0   = ADCEN = 1 (enable ADC circuit)
      */
-    ADCCON1 = 0x01;
+    ADCCON1 = 0x11;     /* ADCDIV=01, ADCEN=1 */
 
-    /* ADCCON2: trigger source = software */
-    ADCCON2 = 0x00;
+    /*
+     * ADCCON2: sampling time
+     *   Bit 3:1 = ADCAQT = 001 (10 ADC clock acquisition time)
+     */
+    ADCCON2 = 0x02;
 }
 
 uint16_t adc_read(uint8_t channel)
 {
     uint16_t result;
 
-    /* Select channel */
-    ADCCON0 = 0x80 | (channel & 0x0F);
+    /* Select channel (ADCCON0 bits 3:0 = channel) */
+    ADCCON0 = (channel & 0x0F);
 
-    /* Start conversion */
-    ADCCON0 |= 0x20;  /* ADCS = 1 */
+    /* Start conversion: set ADCS (bit 6) */
+    ADCS = 1;
 
-    /* Wait for conversion complete (ADCI flag) */
-    while (!(ADCCON0 & 0x40))
+    /* Wait for conversion complete: ADCF (bit 7) set by hardware */
+    while (!ADCF)
         ;
 
-    /* Clear interrupt flag */
-    ADCCON0 &= ~0x40;
+    /* Clear completion flag */
+    ADCF = 0;
 
-    /* Read 12-bit result (ADCRH[7:0] = high 8 bits, ADCRL[3:0] = low 4 bits) */
+    /* Read 12-bit result: ADCRH[7:0]=bits[11:4], ADCRL[7:4]=bits[3:0] */
     result = ((uint16_t)ADCRH << 4) | ((ADCRL >> 4) & 0x0F);
 
     return result;
