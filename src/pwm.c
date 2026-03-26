@@ -96,7 +96,13 @@ void pwm_init(void)
  * The ISR sets outputs based on current_duty and active_pattern.
  */
 
-/* Phase output control — directly drives MOSFET gates */
+/*
+ * Phase output control.
+ *
+ * All gate drives are active-high from the MCU:
+ *   Low-side (N-ch):  MCU HIGH = on (direct gate drive through resistor)
+ *   High-side (P-ch): MCU HIGH = on (small N-FET pulls P-ch gate low)
+ */
 static void phase_all_off(void)
 {
     /* All high-sides off first (prevent shoot-through) */

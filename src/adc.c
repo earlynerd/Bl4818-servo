@@ -1,9 +1,11 @@
 /*
  * ADC Driver — Current sense and battery voltage measurement
  *
- * Uses the MS51FB9AE 12-bit SAR ADC.
- * Channel 6 (P0.6) = current shunt amplifier output
- * Channel 7 (P0.7) = battery voltage divider
+ * Uses the MS51FB9AE 12-bit SAR ADC. VDD = 5.0V (confirmed).
+ *
+ * Confirmed channel assignments:
+ *   ADC_CH3 (P0.6, pin 2) = Current shunt — direct, NO amplifier
+ *   ADC_CH2 (P0.7, pin 3) = Battery voltage — 10k/10k divider (2:1)
  */
 
 #include "ms51_reg.h"
@@ -12,10 +14,9 @@
 
 void adc_init(void)
 {
-    /* Configure P0.6 and P0.7 as analog inputs */
-    /* Set P0M1 bits (input mode) and clear P0M2 bits */
-    P0M1 |=  0xC0;  /* P0.6, P0.7 as input */
-    P0M2 &= ~0xC0;
+    /* Configure P0.6 (ADC_CH3) and P0.7 (ADC_CH2) as analog inputs */
+    P0M1 |=  0xC0;  /* P0.6, P0.7 input mode (M1=1) */
+    P0M2 &= ~0xC0;  /* (M2=0) */
 
     /*
      * ADCCON0: ADC control register 0
@@ -29,9 +30,9 @@ void adc_init(void)
     /*
      * ADCCON1: ADC control register 1
      *   Bit 4-3: ADCDIV = clock divider
-     *   For 12-bit at 24MHz, use divider of 4 → ~500KSPS max
+     *   For 12-bit at 24MHz, use divider for reasonable conversion time.
      */
-    ADCCON1 = 0x01;  /* Conversion time: medium speed */
+    ADCCON1 = 0x01;
 
     /* ADCCON2: trigger source = software */
     ADCCON2 = 0x00;
@@ -65,9 +66,12 @@ uint16_t adc_read_current_ma(void)
     uint16_t raw = adc_read(ADC_CH_CURRENT);
 
     /*
-     * Convert ADC reading to milliamps:
-     * I_mA = raw * ADC_TO_MA_NUM / ADC_TO_MA_DEN
-     *      = raw * 825 / 512
+     * Direct shunt (20mΩ, R020), no amplifier. VDD = 5.0V reference.
+     *
+     * I_mA = raw × ADC_TO_MA_NUM / ADC_TO_MA_DEN
+     *      = raw × 2500 / 41
+     *
+     * At 20mΩ: ~61mA per LSB, 5A = ADC ~82
      *
      * Use 32-bit intermediate to avoid overflow.
      */
@@ -81,13 +85,17 @@ uint16_t adc_read_voltage_mv(void)
     uint16_t raw = adc_read(ADC_CH_VOLTAGE);
 
     /*
-     * Battery voltage divider assumed to be ~11:1 ratio
-     * (10k + 1k divider for up to ~36V range).
-     * V_batt_mV = raw * 3300 / 4096 * 11
-     *           = raw * 36300 / 4096
-     *           ≈ raw * 554 / 64
+     * 10k/10k voltage divider (2:1 ratio). VDD = 5.0V reference.
+     *
+     * V_batt_mV = raw / 4096 × 5000 × 2
+     *           = raw × 10000 / 4096
+     *           ≈ raw × 625 / 256
+     *
+     * NOTE: With 2:1 divider and 5V ref, max measurable = 10V.
+     * At 12V nominal, divider output is 6V → clipped at 5V.
+     * Only useful for detecting battery voltages below ~10V.
      */
-    uint32_t mv = (uint32_t)raw * 554 / 64;
+    uint32_t mv = (uint32_t)raw * 625 / 256;
 
     return (uint16_t)mv;
 }

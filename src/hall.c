@@ -1,11 +1,16 @@
 /*
  * Hall Sensor Interface
  *
- * Reads three hall sensors on P1.0, P1.1, P1.2 and tracks
- * rotor position via state transitions. Uses pin-change interrupt
- * for immediate commutation updates.
+ * Reads three hall sensors and tracks rotor position via state transitions.
  *
- * Hall encoding (3 bits: CBA):
+ * Confirmed pin assignments:
+ *   Hall 1 = P1.5 (pin 10)
+ *   Hall 2 = P1.7 (pin 6)  — has INT1
+ *   Hall 3 = P3.0 (pin 5)  — has INT0
+ *
+ * Halls are on different ports — must read individually.
+ *
+ * Hall encoding (3 bits: hall3:hall2:hall1):
  *   State 1: 001  (0° electrical)
  *   State 3: 011  (60°)
  *   State 2: 010  (120°)
@@ -14,6 +19,9 @@
  *   State 5: 101  (300°)
  *
  * States 0 and 7 are invalid (all same = sensor fault).
+ *
+ * NOTE: The actual hall sequence depends on motor wiring. The commutation
+ * table may need to be rotated after first power-up test.
  */
 
 #include "ms51_reg.h"
@@ -52,29 +60,40 @@ static uint16_t last_transition_time;
 
 void hall_init(void)
 {
-    /* Configure P1.0, P1.1, P1.2 as inputs with pull-up */
-    P1M1 |=  0x07;   /* Input mode */
-    P1M2 &= ~0x07;
+    /* Configure hall sensor pins as inputs (confirmed assignments) */
+
+    /* Hall 1 = P1.5 (pin 10) — configure as input */
+    P1M1 |=  0x20;   /* P1.5 M1=1 */
+    P1M2 &= ~0x20;   /* P1.5 M2=0 */
+
+    /* Hall 2 = P1.7 (pin 6) — configure as input (has INT1) */
+    P1M1 |=  0x80;   /* P1.7 M1=1 */
+    P1M2 &= ~0x80;   /* P1.7 M2=0 */
+
+    /* Hall 3 = P3.0 (pin 5) — configure as input (has INT0) */
+    P3M1 |=  0x01;   /* P3.0 M1=1 */
+    P3M2 &= ~0x01;   /* P3.0 M2=0 */
 
     prev_hall = hall_read();
     detected_direction = 0;
     hall_position = 0;
     transition_period = 0xFFFF;  /* Unknown speed */
     last_transition_time = 0;
-
-    /*
-     * Enable pin interrupt on P1.0, P1.1, P1.2 for hall state changes.
-     * The MS51 pin interrupt triggers on both edges.
-     * We use the pin interrupt vector to call hall_isr().
-     */
-    /* Pin interrupt enable for P1.0-P1.2 would be configured via
-     * PICON, PINEN, PIPEN registers. For now, we poll in the
-     * control loop and also check in the Timer ISR for responsiveness. */
 }
 
 uint8_t hall_read(void)
 {
-    return (HALL_PORT >> HALL_SHIFT) & HALL_MASK;
+    /*
+     * Read hall sensors from individual pins (possibly on different ports).
+     * Returns 3-bit value: bit2=C, bit1=B, bit0=A.
+     */
+    uint8_t state = 0;
+
+    if (HALL_A_PIN) state |= 0x01;
+    if (HALL_B_PIN) state |= 0x02;
+    if (HALL_C_PIN) state |= 0x04;
+
+    return state;
 }
 
 uint8_t hall_sector(void)

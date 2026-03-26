@@ -38,58 +38,54 @@ BL4818 brushless motor driver board (commonly sold for massage gun / fascia gun 
 | Flash              | 16 KB (APROM)             |
 | RAM                | 256B IRAM + 1KB XRAM      |
 | Package            | TSSOP-20                  |
-| Supply Voltage     | 12–24V DC (3S–6S LiPo)   |
-| Bridge             | 3-phase complementary (6× N-ch MOSFET) |
+| Supply Voltage     | 12V DC (3S LiPo)         |
+| Logic Voltage      | 5V (onboard regulator)   |
+| Bridge             | 3-phase complementary (P+N pair per phase) |
 | Position Sensing   | 3× Hall effect sensors    |
 | Current Sensing    | Low-side shunt resistor   |
 
 ### Pin Mapping (MS51FB9AE TSSOP-20)
 
+From the official Nuvoton datasheet:
+
 ```
-Pin  Port   Function            Board Connection
-───  ─────  ──────────────────  ─────────────────────
- 1   P0.5   PWM0 (CH5)          Bridge phase C high-side
- 2   P0.6   ADC CH6 / GPIO      Current shunt ADC input
- 3   P0.7   ADC CH7 / GPIO      Battery voltage divider (optional)
- 4   P2.0   ICE_DAT / GPIO      Programming header DAT
- 5   VDD    Power                3.3V regulated
- 6   VSS    Ground               GND
- 7   P1.7   PWM0 (CH0)          Bridge phase A high-side
- 8   P1.6   PWM0 (CH1)          Bridge phase A low-side
- 9   P1.5   PWM0 (CH2)          Bridge phase B high-side
-10   P1.4   PWM0 (CH3)          Bridge phase B low-side
-11   P1.3   PWM0 (CH4)          Bridge phase C low-side
-12   P1.2   GPIO / INT          Hall sensor A
-13   P1.1   GPIO / INT          Hall sensor B
-14   P1.0   GPIO / INT / T2     Hall sensor C
-15   P0.0   GPIO / INT          Direction input
-16   P0.1   GPIO / CLK_OUT      PWM speed input (from ESC signal)
-17   P0.2   ICE_CLK             Programming header CLK
-18   P0.3   GPIO                Enable / brake input
-19   P0.4   GPIO                LED indicator
-20   P3.0   GPIO                Encoder A (optional add-on)
+Pin  Port   Key Functions                      Board Connection
+───  ─────  ─────────────────────────────────  ─────────────────────
+ 1   P0.5   T0 / PWM0_CH2 / ADC_CH4           Tach output (N-FET inverted)
+ 2   P0.6   UART0_TXD / ADC_CH3               Current shunt (direct, no amp)
+ 3   P0.7   UART0_RXD / ADC_CH2               Battery voltage (10k/10k divider)
+ 4   P2.0   nRESET                             Prog header "R"
+ 5   P3.0   INT0 / ADC_CH1                     Hall sensor 3
+ 6   P1.7   INT1 / ADC_CH0                     Hall sensor 2
+ 7   VSS    Ground                             GND
+ 8   P1.6   ICE_DAT / UART1_TX / [I2C0_SDA]   Prog header "P"
+ 9   VDD    Power (2.4–5.5V)                   5V from regulator
+10   P1.5   PWM0_CH5 / SPI0_SS                 Hall sensor 1
+11   P1.4   PWM0_BRAKE / PWM0_CH1              Direction input
+12   P1.3   I2C0_SCL                           NC (available for expansion)
+13   P1.2   PWM0_CH0                           Phase U low-side gate
+14   P1.1   ADC_CH7 / PWM0_CH1                 Phase U high-side gate
+15   P1.0   PWM0_CH2 / SPI0_CLK                Phase V high-side gate
+16   P0.0   PWM0_CH3 / SPI0_MOSI / T1         Phase V low-side gate
+17   P0.1   PWM0_CH4 / SPI0_MISO               Phase W low-side gate
+18   P0.2   ICE_CLK / UART1_RX / [I2C0_SCL]   Prog header "S"
+19   P0.3   ADC_CH6 / PWM0_CH5                 Phase W high-side gate
+20   P0.4   ADC_CH5 / PWM0_CH3 / STADC         PWM speed input (unpop RC)
 ```
 
-> **Note:** Pin mapping may vary between board revisions. Verify against your
-> specific board before flashing. The above is a representative mapping based on
-> common BL4818 boards.
+**Programming header** (silkscreen: P, R, S, +, −):
+P = ICE_DAT (pin 8), R = nRESET (pin 4), S = ICE_CLK (pin 18),
+\+ = VDD (pin 9), − = GND (pin 7)
 
-### Adding an Encoder
+> All pin assignments confirmed by multimeter probing.
+> See [docs/pinout.md](docs/pinout.md) for detailed circuit notes.
 
-To use servo position mode, solder an incremental encoder (quadrature A/B signals)
-to the available GPIO pins. Directly use the existing hall sensors for
-coarse position feedback (6 states per electrical revolution), or use the GPIOs
-as follows:
+### UART
 
-| Signal     | Pin   | Notes                          |
-|------------|-------|--------------------------------|
-| Encoder A  | P3.0  | 3.3V logic level               |
-| Encoder B  | P0.1  | Replaces PWM input in servo mode |
-| Index (Z)  | P0.0  | Optional, replaces direction input |
-
-UART TX/RX are directly accessible on P0.6/P0.7 when not used for ADC. However,
-current sense uses P0.6, so in practice UART TX shares with the voltage divider
-input (P0.7) and UART RX needs a bodge wire or dedicated pin.
+UART0 TX/RX are on P0.6 (pin 2) and P0.7 (pin 3), but on this board
+those pins are used for the current shunt ADC and voltage divider ADC.
+For serial communication, use **UART1** on the programming header pads:
+UART1_TX = P1.6 (pin 8, header "P"), UART1_RX = P0.2 (pin 18, header "S").
 
 ## Features
 
