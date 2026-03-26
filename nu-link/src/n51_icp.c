@@ -369,7 +369,7 @@ void N51ICP_read_ucid(uint8_t * buf)
 uint32_t N51ICP_read_flash(uint32_t addr, uint32_t len, uint8_t *data)
 {
 	if (len == 0) {
-		return 0;
+		return addr;
 	}
 	N51ICP_send_command(ICP_CMD_READ_FLASH, addr);
 
@@ -382,7 +382,7 @@ uint32_t N51ICP_read_flash(uint32_t addr, uint32_t len, uint8_t *data)
 uint32_t N51ICP_write_flash(uint32_t addr, uint32_t len, uint8_t *data)
 {
 	if (len == 0) {
-		return 0;
+		return addr;
 	}
 	N51ICP_send_command(ICP_CMD_WRITE_FLASH, addr);
 	for (uint32_t i = 0; i < len; i++) {

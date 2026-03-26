@@ -2,11 +2,11 @@
  * Flash IAP — Non-volatile parameter storage
  *
  * Uses the MS51FB9AE IAP (In-Application Programming) to store
- * configuration parameters in the last page of APROM.
+ * configuration parameters in the last page of the configured APROM span.
  *
- * APROM size = 16KB = 0x4000
+ * APROM size is provided by the build configuration.
  * Page size  = 128 bytes
- * Last page  = 0x3F80 - 0x3FFF
+ * Param page = APROM_SIZE - 128
  *
  * We store the params_t structure at the start of the last page.
  * The page must be erased before writing (all bits set to 1).
@@ -15,8 +15,6 @@
 #include "ms51_reg.h"
 #include "ms51_config.h"
 #include "flash.h"
-
-#define PARAM_PAGE_ADDR  0x3F80  /* Last 128-byte page of 16KB APROM */
 
 /*
  * IAP helper: enable IAP mode (IAPEN in CHPCON, TA-protected).

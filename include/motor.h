@@ -10,7 +10,7 @@
 typedef enum {
     MOTOR_IDLE,         /* Outputs disabled, coasting */
     MOTOR_RUN,          /* Normal commutation */
-    MOTOR_BRAKE,        /* Active braking (low-sides on) */
+    MOTOR_BRAKE,        /* Controlled deceleration / coast stop */
     MOTOR_FAULT,        /* Fault condition (overcurrent, stall) */
     MOTOR_REVERSING     /* Direction change in progress */
 } motor_state_t;
@@ -40,9 +40,12 @@ void motor_set_torque_limit(uint16_t ma); /* Current limit */
 
 /* Commands */
 void motor_start(void);
-void motor_stop(void);      /* Active brake */
+void motor_stop(void);      /* Controlled brake / coast */
 void motor_release(void);   /* Coast (disable outputs) */
 void motor_clear_fault(void);
+
+/* Fast-path polling for hall-driven commutation updates */
+void motor_poll_fast(void);
 
 /* State query */
 motor_state_t motor_get_state(void);

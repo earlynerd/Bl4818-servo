@@ -91,6 +91,9 @@ void main(void)
 
     /* ── Main Loop ───────────────────────────────────────────────────── */
     while (1) {
+        /* Fast path: keep commutation aligned to hall edges between 1 kHz control ticks */
+        motor_poll_fast();
+
         /* Wait for Timer 1 overflow (1 kHz tick) */
         if (TF1) {
             TF1 = 0;  /* Clear flag */

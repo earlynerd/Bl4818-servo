@@ -168,22 +168,8 @@ void commutation_update(int8_t direction)
 
 void commutation_brake(void)
 {
-    /*
-     * Active braking: all low-sides ON, all high-sides OFF.
-     * This shorts the motor windings through the low-side FETs,
-     * converting kinetic energy to heat in winding resistance.
-     *
-     * All channels masked:
-     *   CH0 (U_lo) = HIGH (on)    bit 0 = 1
-     *   CH1 (U_hi) = LOW  (off)   bit 1 = 0
-     *   CH2 (V_hi) = LOW  (off)   bit 2 = 0
-     *   CH3 (V_lo) = HIGH (on)    bit 3 = 1
-     *   CH4 (W_lo) = HIGH (on)    bit 4 = 1
-     *   CH5 (W_hi) = LOW  (off)   bit 5 = 0
-     *
-     * PMD = 0b011001 = 0x19
-     */
-    pwm_set_commutation(0x3F, 0x19);
+    /* Avoid hard dynamic braking; the safer fallback is all phases off. */
+    commutation_coast();
 }
 
 void commutation_coast(void)

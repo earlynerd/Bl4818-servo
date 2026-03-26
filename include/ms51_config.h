@@ -34,13 +34,40 @@
 #ifndef MS51_CONFIG_H
 #define MS51_CONFIG_H
 
+#ifndef FLASH_TOTAL_SIZE
+#define FLASH_TOTAL_SIZE    16384U
+#endif
+
+#ifndef LDROM_SIZE
+#define LDROM_SIZE          0U
+#endif
+
+#ifndef APROM_SIZE
+#define APROM_SIZE          (FLASH_TOTAL_SIZE - LDROM_SIZE)
+#endif
+
+#define FLASH_PAGE_SIZE     128U
+#define PARAM_PAGE_ADDR     (APROM_SIZE - FLASH_PAGE_SIZE)
+
+#if FLASH_TOTAL_SIZE != 16384U
+#error "This firmware currently targets the 16 KB MS51FB9AE flash layout only."
+#endif
+
+#if (APROM_SIZE + LDROM_SIZE) != FLASH_TOTAL_SIZE
+#error "APROM_SIZE + LDROM_SIZE must match FLASH_TOTAL_SIZE."
+#endif
+
+#if (APROM_SIZE < FLASH_PAGE_SIZE) || ((APROM_SIZE % FLASH_PAGE_SIZE) != 0)
+#error "APROM_SIZE must be page-aligned and at least one flash page."
+#endif
+
 /* ── System Clock ────────────────────────────────────────────────────────── */
 #define FSYS            16000000UL  /* 16 MHz HIRC (default after reset) */
 
 /* ── PWM Configuration ───────────────────────────────────────────────────── */
 #define PWM_FREQUENCY   20000       /* 20 kHz switching frequency */
-#define PWM_PERIOD      (FSYS / PWM_FREQUENCY)  /* 1200 counts at 24MHz */
-#define PWM_DEAD_TIME   24          /* 1us dead time at 24MHz */
+#define PWM_PERIOD      (FSYS / PWM_FREQUENCY)
+#define PWM_DEAD_TIME   ((FSYS + 999999UL) / 1000000UL)  /* ~1 us dead time */
 #define PWM_MAX_DUTY    (PWM_PERIOD - 2 * PWM_DEAD_TIME)
 
 /* ── Pin Assignments — CONFIRMED ─────────────────────────────────────────── */
@@ -141,6 +168,7 @@
 #define ADC_RESOLUTION          4096    /* 12-bit ADC */
 #define CURRENT_LIMIT_MA        5000    /* 5A overcurrent threshold */
 #define CURRENT_WARN_MA         3000    /* Soft current limit for regulation */
+#define BRAKE_COAST_CURRENT_MA  2500    /* Exit braking torque and coast above this current */
 
 /*
  * Convert ADC reading to milliamps (no amplifier, 20mΩ shunt):
@@ -186,6 +214,9 @@
 #define STALL_TIMEOUT_MS    500     /* Stall detection timeout */
 #define WATCHDOG_TIMEOUT_MS 1000    /* Watchdog period */
 #define COMM_TIMEOUT_MS     2000    /* Serial command timeout */
+#define BRAKE_ENTRY_RPM     200     /* Start controlled braking above this speed */
+#define BRAKE_RELEASE_RPM   50      /* Coast when speed drops below this threshold */
+#define BRAKE_DUTY_LIMIT    (PWM_MAX_DUTY / 8)
 
 /* ── Feature Toggles ─────────────────────────────────────────────────────── */
 #define FEATURE_ENCODER     0       /* Disabled until encoder wired up */

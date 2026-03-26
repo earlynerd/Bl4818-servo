@@ -68,8 +68,8 @@
 #define SEQ_UPDATE_PKT_SIZE    56
 
 #define DUMP_PKT_CHECKSUM_START  PKT_HEADER_END
-#define DUMP_PKT_CHECKSUM_SIZE   0 // disabled for now
-#define DUMP_DATA_START          PKT_HEADER_END //(DUMP_PKT_CHECKSUM_START + DUMP_PKT_CHECKSUM_SIZE)
-#define DUMP_DATA_SIZE           56  //(PACKSIZE - DUMP_DATA_START)
+#define DUMP_PKT_CHECKSUM_SIZE   0 // current wire format does not append a dump checksum field
+#define DUMP_DATA_START          PKT_HEADER_END
+#define DUMP_DATA_SIZE           56
 
-#define CHECK_SEQUENCE_NO 0 // TODO: turn this on when we know the sequence number is working
+#define CHECK_SEQUENCE_NO 0 // keep relaxed sequence checks for compatibility with existing host tools

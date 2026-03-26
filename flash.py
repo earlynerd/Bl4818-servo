@@ -152,10 +152,11 @@ class ISPProgrammer:
                 try:
                     self._send_raw(self._build_packet(CMD_RUN_APROM))
                     self.seq_num += 1
-                except Exception:
-                    pass
+                except (serial.SerialException, OSError) as exc:
+                    print(f"WARNING: failed to send RUN_APROM during close: {exc}", file=sys.stderr)
                 time.sleep(RESET_TIMEOUT)
             self.ser.close()
+            self.ser = None
 
     def _build_packet(self, cmd, data=b""):
         """Build a 64-byte ISP packet: [cmd:4][seq:4][data:56], zero-padded."""

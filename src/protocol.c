@@ -48,6 +48,57 @@ static void send_err(void)
     uart_puts("ERR\n");
 }
 
+static uint8_t params_set_by_id(params_t *p, uint8_t param_id, int32_t val)
+{
+    switch (param_id) {
+    case 0: p->mode = (uint8_t)val; break;
+    case 1: p->torque_limit = (uint16_t)val; break;
+    case 2: p->pid_pos_kp = (int16_t)val; break;
+    case 3: p->pid_pos_ki = (int16_t)val; break;
+    case 4: p->pid_pos_kd = (int16_t)val; break;
+    case 5: p->pid_vel_kp = (int16_t)val; break;
+    case 6: p->pid_vel_ki = (int16_t)val; break;
+    case 7: p->pid_vel_kd = (int16_t)val; break;
+    case 8: p->encoder_cpr = (uint16_t)val; break;
+    default:
+        return 0;
+    }
+
+    return 1;
+}
+
+static uint8_t params_get_by_id(const params_t *p, uint8_t param_id, int32_t *pval)
+{
+    switch (param_id) {
+    case 0: *pval = p->mode; break;
+    case 1: *pval = p->torque_limit; break;
+    case 2: *pval = p->pid_pos_kp; break;
+    case 3: *pval = p->pid_pos_ki; break;
+    case 4: *pval = p->pid_pos_kd; break;
+    case 5: *pval = p->pid_vel_kp; break;
+    case 6: *pval = p->pid_vel_ki; break;
+    case 7: *pval = p->pid_vel_kd; break;
+    case 8: *pval = p->encoder_cpr; break;
+    default:
+        return 0;
+    }
+
+    return 1;
+}
+
+static const char *parse_param_id(const char *s, uint8_t *param_id)
+{
+    int32_t parsed;
+    const char *end = parse_int32(s, &parsed);
+
+    if (end == s || parsed < 0 || parsed > 255) {
+        return 0;
+    }
+
+    *param_id = (uint8_t)parsed;
+    return end;
+}
+
 static void process_command(void)
 {
     int32_t val;
@@ -125,21 +176,15 @@ static void process_command(void)
     case 'W':  /* Write parameter: W<param>=<value> */
         {
             params_t p;
+            uint8_t param_id;
+            const char *sep;
             flash_load_params(&p);
-            /* Parse param name (single digit for now) */
-            if (cmd_len > 3 && cmd_buf[2] == '=') {
-                parse_int32(&cmd_buf[3], &val);
-                switch (cmd_buf[1]) {
-                case '0': p.mode = (uint8_t)val; break;
-                case '1': p.torque_limit = (uint16_t)val; break;
-                case '2': p.pid_pos_kp = (int16_t)val; break;
-                case '3': p.pid_pos_ki = (int16_t)val; break;
-                case '4': p.pid_pos_kd = (int16_t)val; break;
-                case '5': p.pid_vel_kp = (int16_t)val; break;
-                case '6': p.pid_vel_ki = (int16_t)val; break;
-                case '7': p.pid_vel_kd = (int16_t)val; break;
-                case '8': p.encoder_cpr = (uint16_t)val; break;
-                default: send_err(); return;
+            sep = parse_param_id(&cmd_buf[1], &param_id);
+            if (sep && *sep == '=' && *(sep + 1) != '\0') {
+                parse_int32(sep + 1, &val);
+                if (!params_set_by_id(&p, param_id, val)) {
+                    send_err();
+                    return;
                 }
                 flash_save_params(&p);
                 send_ok();
@@ -152,21 +197,12 @@ static void process_command(void)
     case 'G':  /* Get parameter */
         {
             params_t p;
+            uint8_t param_id;
+            int32_t pval;
+            const char *end;
             flash_load_params(&p);
-            if (cmd_len > 1) {
-                int32_t pval = 0;
-                switch (cmd_buf[1]) {
-                case '0': pval = p.mode; break;
-                case '1': pval = p.torque_limit; break;
-                case '2': pval = p.pid_pos_kp; break;
-                case '3': pval = p.pid_pos_ki; break;
-                case '4': pval = p.pid_pos_kd; break;
-                case '5': pval = p.pid_vel_kp; break;
-                case '6': pval = p.pid_vel_ki; break;
-                case '7': pval = p.pid_vel_kd; break;
-                case '8': pval = p.encoder_cpr; break;
-                default: send_err(); return;
-                }
+            end = parse_param_id(&cmd_buf[1], &param_id);
+            if (end && *end == '\0' && params_get_by_id(&p, param_id, &pval)) {
                 uart_put_int(pval);
                 uart_putc('\n');
             } else {

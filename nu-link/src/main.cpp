@@ -360,6 +360,16 @@ static bool is_nvm_range_valid(uint32_t addr, uint32_t size) {
   return is_range_valid(addr, size, get_flash_size(), "whole-ROM");
 }
 
+static bool is_whole_rom_update_valid(uint32_t addr, uint32_t size) {
+  config_flags flags;
+  read_config(&flags);
+  if (get_ldrom_size(&flags) != 0) {
+    DEBUG_PRINT("whole-ROM write rejected: LDROM is reserved; use APROM-only update commands\n");
+    return false;
+  }
+  return is_nvm_range_valid(addr, size);
+}
+
 static bool is_config_safe(const config_flags *flags) {
 #if NO_DANGEROUS_CONFIGS
   config_flags decoded = *flags;
@@ -893,7 +903,7 @@ void loop()
         INVALIDATE_CACHE;
         update_addr = (rx_buf[9] << 8) | rx_buf[8];
         update_size = (rx_buf[13] << 8) | rx_buf[12];
-        if (!is_nvm_range_valid((uint32_t)update_addr, update_size)) {
+        if (!is_whole_rom_update_valid((uint32_t)update_addr, update_size)) {
           fail_pkt();
           break;
         }
