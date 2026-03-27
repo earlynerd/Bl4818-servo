@@ -18,6 +18,7 @@ typedef struct {
     int16_t  pid_vel_ki;
     int16_t  pid_vel_kd;
     uint16_t encoder_cpr;   /* Encoder counts per revolution */
+    uint8_t  commutation_offset; /* 0-5: rotate hall/phase alignment */
     uint8_t  checksum;      /* Simple checksum */
 } params_t;
 

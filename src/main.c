@@ -247,5 +247,6 @@ static void apply_params(void)
 {
     motor_set_mode(params.mode);
     motor_set_torque_limit(params.torque_limit);
+    commutation_set_offset(params.commutation_offset);
     /* PID gains would be applied here if we exposed setters */
 }

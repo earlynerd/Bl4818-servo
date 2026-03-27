@@ -45,6 +45,9 @@ Adafruit_USBD_CDC DebugSerial;
 #define BUILTIN_LED LED_BUILTIN
 #endif
 
+#define TARGET_UART_DEFAULT_BAUD 115200
+#define TARGET_UART_FIFO_SIZE    256
+
 
 #define PAGE_SIZE            128 // flash page size
 #define PAGE_MASK            0xFF80
@@ -84,6 +87,10 @@ uint8_t connected = 0;
 uint8_t just_connected = 0;
 unsigned long last_read_time = 0;
 unsigned long curr_time = 0;
+static SerialPIO target_uart(N51PGM_CLK_PIN, N51PGM_DAT_PIN, TARGET_UART_FIFO_SIZE);
+static bool target_uart_running = false;
+static uint32_t target_uart_baud = 0;
+static uint16_t target_uart_config = SERIAL_8N1;
 
 #if CACHED_ROM_READ
 byte read_buff[MAX_FLASH_SIZE];
@@ -105,6 +112,10 @@ int get_ldrom_size(config_flags *flags);
 static bool is_unsynced_cmd(int cmd);
 static void write_u32_to_tx(uint32_t value);
 static bool enter_icp_after_power_cycle(uint16_t off_ms, uint16_t delay_us);
+static uint16_t get_debug_uart_config(void);
+static bool debug_passthrough_allowed(void);
+static void stop_debug_passthrough(void);
+static void service_debug_passthrough(void);
 
 
 #ifdef _DEBUG
@@ -518,6 +529,101 @@ static bool enter_icp_after_power_cycle(uint16_t off_ms, uint16_t delay_us) {
   return get_flash_info(saved_device_id) != NULL;
 }
 
+static uint16_t get_debug_uart_config(void) {
+  uint16_t config = 0;
+
+  switch (DebugSerial.numbits()) {
+    case 5:
+      config |= SERIAL_DATA_5;
+      break;
+    case 6:
+      config |= SERIAL_DATA_6;
+      break;
+    case 7:
+      config |= SERIAL_DATA_7;
+      break;
+    default:
+      config |= SERIAL_DATA_8;
+      break;
+  }
+
+  switch (DebugSerial.paritytype()) {
+    case 1: /* CDC odd parity */
+      config |= SERIAL_PARITY_ODD;
+      break;
+    case 2: /* CDC even parity */
+      config |= SERIAL_PARITY_EVEN;
+      break;
+    default:
+      config |= SERIAL_PARITY_NONE;
+      break;
+  }
+
+  if (DebugSerial.stopbits() == 2) {
+    config |= SERIAL_STOP_BIT_2;
+  } else {
+    config |= SERIAL_STOP_BIT_1;
+  }
+
+  return config;
+}
+
+static bool debug_passthrough_allowed(void) {
+  return state == DISCONNECTED_STATE && rx_bufhead == 0 && !N51PGM_is_init();
+}
+
+static void stop_debug_passthrough(void) {
+  if (!target_uart_running) {
+    return;
+  }
+
+  target_uart.end();
+  target_uart_running = false;
+}
+
+static void service_debug_passthrough(void) {
+  uint32_t baud;
+  uint16_t config;
+
+  if (!debug_passthrough_allowed() || !DebugSerial.dtr()) {
+    stop_debug_passthrough();
+    return;
+  }
+
+  baud = DebugSerial.baud();
+  if (baud == 0) {
+    baud = TARGET_UART_DEFAULT_BAUD;
+  }
+  config = get_debug_uart_config();
+
+  if (!target_uart_running || baud != target_uart_baud || config != target_uart_config) {
+    stop_debug_passthrough();
+    target_uart_baud = baud;
+    target_uart_config = config;
+    target_uart.begin(target_uart_baud, target_uart_config);
+    target_uart_running = (bool)target_uart;
+    if (!target_uart_running) {
+      return;
+    }
+  }
+
+  while (DebugSerial.available() && target_uart.availableForWrite() > 0) {
+    int ch = DebugSerial.read();
+    if (ch < 0) {
+      break;
+    }
+    target_uart.write((uint8_t)ch);
+  }
+
+  while (target_uart.available() && DebugSerial.availableForWrite() > 0) {
+    int ch = target_uart.read();
+    if (ch < 0) {
+      break;
+    }
+    DebugSerial.write((uint8_t)ch);
+  }
+}
+
 
 void read_config(config_flags *flags) {
   N51ICP_read_flash(CFG_FLASH_ADDR, CFG_FLASH_LEN, (uint8_t *)flags);
@@ -593,6 +699,7 @@ void loop()
 {
   curr_time = millis();
   if (Serial.available()) {
+    stop_debug_passthrough();
     int tmp = Serial.read();
     rx_buf[rx_bufhead++] = tmp;
     if (state == DISCONNECTED_STATE) {
@@ -967,4 +1074,6 @@ void loop()
     }
   }
 #endif
+
+  service_debug_passthrough();
 }

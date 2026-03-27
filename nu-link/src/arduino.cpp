@@ -1,19 +1,6 @@
 #include <Arduino.h>
 #define _DEBUG
 #include "n51_pgm.h"
-/* Lolin(WeMOS) D1 mini */
-/* 80MHz: 1 cycle = 12.5ns */
-#ifndef ARDUINO_AVR_MEGA2560
-#define DAT   11
-#define CLK   12
-#define RST   13
-#define PWR   10
-#else
-#define DAT   52
-#define CLK   50
-#define RST   48
-#define PWR   46
-#endif
 
 #ifndef TARGET_POWER_ACTIVE_HIGH
 #define TARGET_POWER_ACTIVE_HIGH 1
@@ -36,11 +23,11 @@ static void N51PGM_init_power_pin(void)
     return;
   }
 
-  pinMode(PWR, OUTPUT);
+  pinMode(N51PGM_PWR_PIN, OUTPUT);
 #if TARGET_POWER_ACTIVE_HIGH
-  digitalWrite(PWR, TARGET_POWER_DEFAULT_ON ? HIGH : LOW);
+  digitalWrite(N51PGM_PWR_PIN, TARGET_POWER_DEFAULT_ON ? HIGH : LOW);
 #else
-  digitalWrite(PWR, TARGET_POWER_DEFAULT_ON ? LOW : HIGH);
+  digitalWrite(N51PGM_PWR_PIN, TARGET_POWER_DEFAULT_ON ? LOW : HIGH);
 #endif
   power_pin_initialized = 1;
 }
@@ -48,11 +35,11 @@ static void N51PGM_init_power_pin(void)
 int N51PGM_init(void)
 {
   N51PGM_init_power_pin();
-  pinMode(CLK, OUTPUT);
-  pinMode(DAT, INPUT);
-  pinMode(RST, OUTPUT);
-  digitalWrite(CLK, LOW);
-  digitalWrite(RST, LOW);
+  pinMode(N51PGM_CLK_PIN, OUTPUT);
+  pinMode(N51PGM_DAT_PIN, INPUT);
+  pinMode(N51PGM_RST_PIN, OUTPUT);
+  digitalWrite(N51PGM_CLK_PIN, LOW);
+  digitalWrite(N51PGM_RST_PIN, LOW);
   initialized = 1;
 
   return 0;
@@ -65,22 +52,22 @@ uint8_t N51PGM_is_init(void){
 
 void N51PGM_set_dat(uint8_t val)
 {
-  digitalWrite(DAT, val);
+  digitalWrite(N51PGM_DAT_PIN, val);
 }
 
 uint8_t N51PGM_get_dat(void)
 {
-  return digitalRead(DAT);
+  return digitalRead(N51PGM_DAT_PIN);
 }
 
 void N51PGM_set_rst(uint8_t val)
 {
-  digitalWrite(RST, val);
+  digitalWrite(N51PGM_RST_PIN, val);
 }
 
 void N51PGM_set_clk(uint8_t val)
 {
-  digitalWrite(CLK, val);
+  digitalWrite(N51PGM_CLK_PIN, val);
 }
 
 void N51PGM_set_target_power(uint8_t on)
@@ -91,22 +78,22 @@ void N51PGM_set_target_power(uint8_t on)
     initialized = 0;
   }
 #if TARGET_POWER_ACTIVE_HIGH
-  digitalWrite(PWR, on ? HIGH : LOW);
+  digitalWrite(N51PGM_PWR_PIN, on ? HIGH : LOW);
 #else
-  digitalWrite(PWR, on ? LOW : HIGH);
+  digitalWrite(N51PGM_PWR_PIN, on ? LOW : HIGH);
 #endif
 }
 
 void N51PGM_dat_dir(uint8_t state)
 {
-  pinMode(DAT, state ? OUTPUT : INPUT);
+  pinMode(N51PGM_DAT_PIN, state ? OUTPUT : INPUT);
 }
 
 void N51PGM_release_pins(void)
 {
-  pinMode(CLK, INPUT);
-  pinMode(DAT, INPUT);
-  pinMode(RST, INPUT);
+  pinMode(N51PGM_CLK_PIN, INPUT);
+  pinMode(N51PGM_DAT_PIN, INPUT);
+  pinMode(N51PGM_RST_PIN, INPUT);
 }
 
 void N51PGM_set_trigger(uint8_t val)
@@ -116,17 +103,17 @@ void N51PGM_set_trigger(uint8_t val)
 
 void N51PGM_release_rst(void)
 {
-  pinMode(RST, INPUT);
+  pinMode(N51PGM_RST_PIN, INPUT);
 }
 
 void N51PGM_deinit(uint8_t leave_reset_high)
 {
-  pinMode(CLK, INPUT);
-  pinMode(DAT, INPUT);
+  pinMode(N51PGM_CLK_PIN, INPUT);
+  pinMode(N51PGM_DAT_PIN, INPUT);
   if (leave_reset_high){
     N51PGM_set_rst(1);
   } else {
-    pinMode(RST, INPUT);
+    pinMode(N51PGM_RST_PIN, INPUT);
   }
   initialized = 0;
 }

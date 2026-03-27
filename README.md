@@ -155,6 +155,12 @@ python flash.py --target-power on
 python flash.py --power-cycle-connect --info
 ```
 
+When the Pico bridge is idle, its secondary USB CDC "debug" port now passes
+through the target MCU UART on the programming header pins. As soon as the host
+starts a Nu-Link `CONNECT`/power-control session, that pass-through is disabled
+so ICP can take over the same wires, then it resumes after the programming
+session ends.
+
 If the target only enters ICP at a narrow power-up window, sweep delays explicitly:
 
 ```bash
@@ -212,10 +218,59 @@ Commands are ASCII text terminated by newline (`\n`):
 | `S`              | Stop (brake)                         | `OK`             |
 | `R`              | Release (coast)                      | `OK`             |
 | `?`              | Query status                         | See below        |
+| `H`              | Query hall sensors                   | See below        |
+| `K`              | Query low-level drive state          | See below        |
 | `G<param>`       | Get parameter                        | `<value>`        |
 | `W<param>=<val>` | Set parameter (saved to flash)       | `OK` or `ERR`    |
 
-Status response format: `pos:<counts>,vel:<rpm>,cur:<mA>,state:<state>,fault:<code>`
+Status response format: `pos:<counts>,vel:<rpm>,cur:<mA>,state:<state>,fault:<code>,hall:<state>,offset:<n>`
+
+Hall response format: `raw:<state>,hall:<logical>,h321:<bits>,dir:<dir>,count:<count>,period:<ticks>`
+
+Drive response format: `raw:<state>,hall:<state>,offset:<n>,state:<state>,fault:<code>,duty:<duty>,run:<0|1>,pmen:<mask>,pmd:<mask>`
+
+### Hall Sequence Bring-Up
+
+If the motor twitches but does not commutate cleanly, identify the hall order
+with the bridge disabled:
+
+1. Send `R` so all three phases coast.
+2. Turn the rotor slowly by hand in the direction you want to call positive.
+3. Send `H` repeatedly and record the `raw:` value each time it changes.
+4. The repeating six-state `raw:` loop is your actual hall sequence.
+
+The firmware expects the logical forward sequence `1 -> 3 -> 2 -> 6 -> 4 -> 5`.
+If your measured raw order differs, edit `hall_decode[]` in `src/hall.c` so each
+observed raw state maps onto that logical order.
+
+Example: if the measured raw forward order is `5 -> 4 -> 6 -> 2 -> 3 -> 1`, use:
+
+```c
+static const uint8_t __code hall_decode[8] = {
+    0, 5, 6, 4, 3, 1, 2, 7
+};
+```
+
+That keeps the commutation tables unchanged and fixes the hall ordering in one
+place.
+
+### Commutation Alignment Tuning
+
+Even with the correct hall order, the phase table can still be rotated by a
+multiple of 60 electrical degrees. That shows up as weak torque, reverse kicks,
+or sectors that appear to coast.
+
+Parameter `9` is the commutation offset:
+
+- `G9` reads the current offset.
+- `W9=<0..5>` rotates the hall-to-phase alignment and saves it to flash.
+
+Recommended tuning flow:
+
+1. Start with a low open-loop command such as `D50`.
+2. Try `W9=0`, `W9=1`, ..., `W9=5`.
+3. For each setting, check whether the motor produces the same torque direction in every hall sector.
+4. If a sector still appears dead, send `K` and check whether `run:1` and the `pmen`/`pmd` masks are nonzero. If they are, the firmware is commanding a phase state and the remaining problem is in gate polarity or phase wiring, not hall decoding.
 
 ## License
 

@@ -4,6 +4,18 @@
 
 #include <stdint.h>
 
+#ifndef ARDUINO_AVR_MEGA2560
+#define N51PGM_DAT_PIN 11
+#define N51PGM_CLK_PIN 12
+#define N51PGM_RST_PIN 13
+#define N51PGM_PWR_PIN 10
+#else
+#define N51PGM_DAT_PIN 52
+#define N51PGM_CLK_PIN 50
+#define N51PGM_RST_PIN 48
+#define N51PGM_PWR_PIN 46
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 

@@ -12,6 +12,10 @@
 /* Initialize commutation tables */
 void commutation_init(void);
 
+/* Rotate hall-to-commutation alignment by 60 electrical degrees per step */
+void commutation_set_offset(uint8_t offset);
+uint8_t commutation_get_offset(void);
+
 /*
  * Get PMEN/PMD mask values for a given hall state and direction.
  * hall_state: 1-6 (from hall sensors)

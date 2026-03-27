@@ -10,7 +10,7 @@
  *
  * Halls are on different ports — must read individually.
  *
- * Hall encoding (3 bits: hall3:hall2:hall1):
+ * Raw hall encoding (3 bits: hall3:hall2:hall1):
  *   State 1: 001  (0° electrical)
  *   State 3: 011  (60°)
  *   State 2: 010  (120°)
@@ -20,15 +20,35 @@
  *
  * States 0 and 7 are invalid (all same = sensor fault).
  *
- * NOTE: The actual hall sequence depends on motor wiring. The commutation
- * table may need to be rotated after first power-up test.
+ * NOTE: The actual raw hall sequence depends on motor wiring and sensor
+ * polarity. The commutation logic below uses logical hall states; adapt
+ * hall_decode[] if the observed raw sequence does not match the canonical
+ * 1→3→2→6→4→5 order.
  */
 
 #include "ms51_reg.h"
 #include "ms51_config.h"
 #include "hall.h"
 
-/* Forward rotation sequence: 1→3→2→6→4→5→1 */
+/*
+ * Raw 3-bit hall pattern -> logical commutation state.
+ *
+ * Default mapping is identity because the current board is expected to match
+ * the canonical hall ordering. If manual testing shows a different raw order,
+ * edit only this table and leave the commutation tables untouched.
+ */
+static const uint8_t __code hall_decode[8] = {
+    0, /* 0: invalid */
+    1, /* 1 -> logical 1 */
+    2, /* 2 -> logical 2 */
+    3, /* 3 -> logical 3 */
+    4, /* 4 -> logical 4 */
+    5, /* 5 -> logical 5 */
+    6, /* 6 -> logical 6 */
+    7  /* 7: invalid */
+};
+
+/* Canonical forward rotation sequence: 1→3→2→6→4→5→1 */
 static const uint8_t __code hall_forward_seq[8] = {
     0xFF, /* 0: invalid */
     3,    /* 1 → next is 3 */
@@ -81,7 +101,7 @@ void hall_init(void)
     last_transition_time = 0;
 }
 
-uint8_t hall_read(void)
+uint8_t hall_read_raw(void)
 {
     /*
      * Read hall sensors from individual pins (possibly on different ports).
@@ -94,6 +114,16 @@ uint8_t hall_read(void)
     if (HALL_C_PIN) state |= 0x04;
 
     return state;
+}
+
+uint8_t hall_decode_state(uint8_t raw_state)
+{
+    return hall_decode[raw_state & 0x07];
+}
+
+uint8_t hall_read(void)
+{
+    return hall_decode_state(hall_read_raw());
 }
 
 uint8_t hall_sector(void)

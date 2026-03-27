@@ -9,7 +9,13 @@
 /* Initialize hall sensor GPIO and interrupt */
 void hall_init(void);
 
-/* Read current hall state (3-bit value, 1-6 valid) */
+/* Read raw hall sensor pins (3-bit value, bit2=Hall3, bit1=Hall2, bit0=Hall1) */
+uint8_t hall_read_raw(void);
+
+/* Map a raw 3-bit hall pattern onto the logical commutation state */
+uint8_t hall_decode_state(uint8_t raw_state);
+
+/* Read logical hall state after applying the decode table (1-6 valid) */
 uint8_t hall_read(void);
 
 /* Get electrical sector from hall state (0-5) */
