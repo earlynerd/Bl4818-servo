@@ -69,8 +69,8 @@
 #define PWM_PERIOD      (FSYS / PWM_FREQUENCY)
 #define PWM_MAX_DUTY    (PWM_PERIOD - 1)  /* Dead-time disabled; masks prevent shoot-through */
 
-/* Default hall-to-commutation alignment, in 60 electrical degree steps. */
-#define DEFAULT_COMMUTATION_OFFSET  2
+/* Hall-to-commutation alignment, in 60 electrical degree steps (0-5). */
+#define COMMUTATION_OFFSET  1
 
 /* ── Pin Assignments — CONFIRMED ─────────────────────────────────────────── */
 
@@ -202,41 +202,10 @@
 #define VDIV_RATIO_NUM      2       /* 10k/10k = 2:1 divider */
 #define VDIV_RATIO_DEN      1
 
-/* ── PID Defaults ────────────────────────────────────────────────────────── */
-#define PID_POS_KP      100
-#define PID_POS_KI      5
-#define PID_POS_KD      50
-#define PID_VEL_KP      50
-#define PID_VEL_KI      10
-#define PID_VEL_KD      5
-#define PID_SCALE       256     /* Fixed-point scale factor (Q8) */
-
 /* ── Timing ──────────────────────────────────────────────────────────────── */
 #define CONTROL_LOOP_HZ     1000    /* 1 kHz control loop */
-#define STALL_TIMEOUT_MS    500     /* Stall detection timeout */
-#define WATCHDOG_TIMEOUT_MS 1000    /* Watchdog period */
-#define COMM_TIMEOUT_MS     2000    /* Serial command timeout */
-#define BRAKE_ENTRY_RPM     200     /* Start controlled braking above this speed */
-#define BRAKE_RELEASE_RPM   50      /* Coast when speed drops below this threshold */
-#define BRAKE_DUTY_LIMIT    (PWM_MAX_DUTY / 8)
 
 /* ── Feature Toggles ─────────────────────────────────────────────────────── */
-#define FEATURE_ENCODER     0       /* Disabled until encoder wired up */
 #define FEATURE_UART        1       /* Enable UART command interface */
-#define FEATURE_PID         1       /* Enable PID loops */
-#define FEATURE_FLASH_SAVE  1       /* Enable parameter save to flash */
-#define FEATURE_LED         0       /* No dedicated LED on stock board */
-
-/* ── Encoder ─────────────────────────────────────────────────────────────── */
-/* When adding encoder: A→P1.3 (pin 12), B→P0.4 (pin 20) */
-#define ENC_A_PIN       P13     /* P1.3 pin 12 - repurpose NC pin */
-#define ENC_B_PIN       P04     /* P0.4 pin 20 - repurpose PWM input */
-#define ENCODER_CPR     1000    /* Counts per revolution (set per encoder) */
-
-/* ── Operating Modes ─────────────────────────────────────────────────────── */
-#define MODE_OPEN_LOOP      0       /* Direct PWM duty control */
-#define MODE_VELOCITY       1       /* Velocity PID */
-#define MODE_POSITION       2       /* Position PID */
-#define MODE_TORQUE         3       /* Current / torque control */
 
 #endif /* MS51_CONFIG_H */

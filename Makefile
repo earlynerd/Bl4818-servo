@@ -26,7 +26,8 @@ INCDIR   = include
 BUILDDIR = build
 
 # ── Sources ──────────────────────────────────────────────────────────────────
-SRCS = $(wildcard $(SRCDIR)/*.c)
+EXCLUDE = $(SRCDIR)/pid.c $(SRCDIR)/encoder.c $(SRCDIR)/flash.c
+SRCS = $(filter-out $(EXCLUDE),$(wildcard $(SRCDIR)/*.c))
 RELS = $(patsubst $(SRCDIR)/%.c,$(BUILDDIR)/%.rel,$(SRCS))
 
 # main.c must be linked first for correct startup

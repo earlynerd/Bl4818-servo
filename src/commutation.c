@@ -35,8 +35,6 @@
 #include "hall.h"
 #include "pwm.h"
 
-static uint8_t hall_offset;
-
 /*
  * Forward commutation tables — low-side-only chopping.
  *
@@ -131,14 +129,12 @@ static uint8_t rotate_hall_state(uint8_t hall_state)
     static const uint8_t __code seq[6] = { 1, 3, 2, 6, 4, 5 };
     uint8_t i;
 
-    if (hall_state == 0 || hall_state == 7) {
+    if (COMMUTATION_OFFSET == 0 || hall_state == 0 || hall_state == 7)
         return hall_state;
-    }
 
     for (i = 0; i < 6; i++) {
-        if (seq[i] == hall_state) {
-            return seq[(i + hall_offset) % 6];
-        }
+        if (seq[i] == hall_state)
+            return seq[(i + COMMUTATION_OFFSET) % 6];
     }
 
     return hall_state;
@@ -146,17 +142,6 @@ static uint8_t rotate_hall_state(uint8_t hall_state)
 
 void commutation_init(void)
 {
-    hall_offset = 0;
-}
-
-void commutation_set_offset(uint8_t offset)
-{
-    hall_offset = offset % 6;
-}
-
-uint8_t commutation_get_offset(void)
-{
-    return hall_offset;
 }
 
 void commutation_get_masks(uint8_t hall_state, int8_t direction,
@@ -187,12 +172,6 @@ void commutation_update(int8_t direction)
 
     commutation_get_masks(hall, direction, &pmen, &pmd);
     pwm_set_commutation(pmen, pmd);
-}
-
-void commutation_brake(void)
-{
-    /* Avoid hard dynamic braking; the safer fallback is all phases off. */
-    commutation_coast();
 }
 
 void commutation_coast(void)
