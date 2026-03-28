@@ -1,30 +1,27 @@
 /*
- * PWM Driver — Hardware Complementary PWM with Dead-Time Insertion
+ * PWM Driver — Low-Side-Only Chopping
  *
- * Uses the MS51FB9AE PWM0 module in complementary mode (PWMMOD=01)
- * with hardware dead-time to prevent shoot-through.
+ * Uses the MS51FB9AE PWM0 module in complementary mode (PWMMOD=01).
+ * Dead-time is disabled — the commutation masks prevent shoot-through.
  *
  * Complementary pairing (even=primary, odd=complement):
  *   CH0/CH1 pair: CH0=P1.2 (Phase U low), CH1=P1.1 (Phase U high)
  *   CH2/CH3 pair: CH2=P1.0 (Phase V high), CH3=P0.0 (Phase V low)
  *   CH4/CH5 pair: CH4=P0.1 (Phase W low), CH5=P0.3 (Phase W high)
  *
- * In complementary mode, the primary channel (CH0/2/4) duty register
- * controls the pair. The complement (CH1/3/5) is the inverted signal
- * with dead-time inserted on rising edges.
+ * Only low-side FETs switch at PWM rate (20 kHz).  High-side FETs are
+ * held DC ON or OFF by the commutation mask registers (PMEN/PMD) and
+ * only change state at commutation transitions.
  *
- * Since CH0 (Phase U low-side) and CH4 (Phase W low-side) are primary,
- * but we want to control HIGH-side on-time, we invert the duty for
- * those pairs: duty_register = PERIOD - desired_duty.
- * Phase V has CH2 (high-side) as primary, so duty is set directly.
+ * This matches the gate drive hardware: low-side N-FETs are driven
+ * directly through 100 ohm (fast on/off), while high-side P-FETs
+ * have only a 1.5k pullup for turn-off (too slow for 20 kHz switching).
  *
- * Six-step commutation uses the PWM Mask registers (PMEN/PMD):
- *   - Active PWM phase: both channels unmasked (complementary switching)
- *   - Active low-side (current return): low-side masked HIGH, hi masked LOW
- *   - Floating phase: both channels masked LOW
- *
- * Dead-time is handled entirely by hardware — even if the firmware has
- * bugs, the hardware guarantees both FETs in a pair are never on together.
+ * Duty register setup for low-side ON time control:
+ *   Phase U (CH0 primary = low-side):  duty_reg = duty  (direct)
+ *   Phase V (CH2 primary = high-side): duty_reg = PERIOD - duty
+ *       (inverted so CH3 complement ON time = duty)
+ *   Phase W (CH4 primary = low-side):  duty_reg = duty  (direct)
  */
 
 #include "ms51_reg.h"
@@ -91,46 +88,43 @@ void pwm_init(void)
 
     /*
      * ── Initial Duty = 0% ───────────────────────────────────────────
-     * Phase U (CH0 primary = low-side): inverted, set to PERIOD
-     * Phase V (CH2 primary = high-side): natural, set to 0
-     * Phase W (CH4 primary = low-side): inverted, set to PERIOD
-     *
-     * CH1/CH3/CH5 duty registers are ignored in complementary mode.
+     * Phase U (CH0 primary = low-side): direct, 0 = low-side OFF
+     * Phase V (CH2 primary = high-side): inverted, PERIOD = CH3 OFF
+     * Phase W (CH4 primary = low-side): direct, 0 = low-side OFF
      */
-    PWM0H = PWMPH;
-    PWM0L = PWMPL;
-    PWM2H = 0x00;
-    PWM2L = 0x00;
+    PWM0H = 0x00;
+    PWM0L = 0x00;
+    PWM2H = PWMPH;
+    PWM2L = PWMPL;
 
     /* CH4/CH5 are on SFR page 1 */
     SFR_PAGE1();
-    PWM4H = PWMPH;
-    PWM4L = PWMPL;
+    PWM4H = 0x00;
+    PWM4L = 0x00;
     SFR_PAGE0();
 
     /*
      * ── Polarity ─────────────────────────────────────────────────────
-     * All channels high-active (PNP=0): MCU output HIGH = FET ON.
-     * The gate drive circuit handles the level shifting:
-     *   Low-side (N-ch): direct gate drive, active high.
-     *   High-side (P-ch): small N-FET inverts to pull P-gate low = ON.
+     * All channels active-high (PNP=0): MCU HIGH = FET ON.
+     *   Low-side (N-ch): 100 ohm direct gate drive, fast on/off.
+     *   High-side (P-ch): small N-FET pulls P-gate low = ON;
+     *       1.5k pullup for turn-off (slow — only switch at commutation rate).
      */
     PNP = 0x00;
 
     /*
      * ── Dead-Time ────────────────────────────────────────────────────
-     * Dead-time is configured via PWM_DEAD_TIME_US.
-     * At 24 MHz and 2 us, PDTCNT = 48 counts.
-     * PDTCNT is TA-protected. PDTEN enables per pair.
-     *
-     * This is the critical safety feature: hardware guarantees that
-     * both FETs in a half-bridge are never on simultaneously, even
-     * if firmware has bugs.
+     * Disabled.  In the low-side-only chopping scheme no half-bridge
+     * ever has both FETs switching at PWM rate — the commutation masks
+     * guarantee at most one channel per half-bridge is unmasked.
+     * Disabling dead-time also eliminates the asymmetry between
+     * primary-driven phases (U/W) and complement-driven phase (V),
+     * since the complement becomes a pure inverse of the primary.
      */
     TIMED_ACCESS();
-    PDTCNT = PWM_DEAD_TIME;
+    PDTCNT = 0;
     TIMED_ACCESS();
-    PDTEN = 0x07;              /* Enable DT for all 3 pairs: CH01, CH23, CH45 */
+    PDTEN = 0x00;              /* Dead-time disabled — masks provide safety */
 
     /*
      * ── Mask: All Off Initially ──────────────────────────────────────
@@ -172,24 +166,25 @@ void pwm_set_duty(uint16_t duty)
     current_duty = duty;
 
     /*
-     * Phases U and W have low-side as primary channel, so duty is
-     * inverted: register = PERIOD - duty.
-     * Phase V has high-side as primary, so register = duty directly.
+     * Low-side ON time = duty counts.
+     * Phases U and W: low-side is primary → register = duty (direct).
+     * Phase V: high-side is primary, low-side is complement →
+     *   register = PERIOD - duty (so complement ON time = duty).
      */
     inv = PWM_PERIOD - duty;
 
-    /* Phase U: CH0 (low-side primary) — inverted */
-    PWM0H = (uint8_t)(inv >> 8);
-    PWM0L = (uint8_t)(inv & 0xFF);
+    /* Phase U: CH0 (low-side primary) — direct */
+    PWM0H = (uint8_t)(duty >> 8);
+    PWM0L = (uint8_t)(duty & 0xFF);
 
-    /* Phase V: CH2 (high-side primary) — natural */
-    PWM2H = (uint8_t)(duty >> 8);
-    PWM2L = (uint8_t)(duty & 0xFF);
+    /* Phase V: CH2 (high-side primary) — inverted for CH3 complement */
+    PWM2H = (uint8_t)(inv >> 8);
+    PWM2L = (uint8_t)(inv & 0xFF);
 
-    /* Phase W: CH4 (low-side primary) — inverted, page 1 */
+    /* Phase W: CH4 (low-side primary) — direct, page 1 */
     SFR_PAGE1();
-    PWM4H = (uint8_t)(inv >> 8);
-    PWM4L = (uint8_t)(inv & 0xFF);
+    PWM4H = (uint8_t)(duty >> 8);
+    PWM4L = (uint8_t)(duty & 0xFF);
     SFR_PAGE0();
 
     /* Trigger buffered load — takes effect at next PWM period boundary */

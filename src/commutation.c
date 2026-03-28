@@ -1,13 +1,21 @@
 /*
- * Six-Step Commutation — PWM Mask-Based
+ * Six-Step Commutation — Low-Side-Only PWM Chopping
  *
- * Maps hall sensor state + direction to PWM mask registers (PMEN/PMD)
- * for hardware complementary PWM commutation.
+ * Maps hall sensor state + direction to PWM mask registers (PMEN/PMD).
  *
- * In six-step (trapezoidal) commutation:
- * - One phase pair is unmasked → complementary PWM switching with dead-time
- * - One phase has its low-side masked ON (current return path)
- * - One phase has both channels masked OFF (floating)
+ * Strategy: Only the sink phase low-side FET switches at PWM rate.
+ * High-side FETs are held DC ON or OFF via masks, switching only at
+ * commutation transitions (~500 Hz at 1000 RPM).
+ *
+ * This avoids shoot-through caused by the slow high-side P-FET turn-off
+ * (1.5k pullup through gate capacitance) which cannot keep up with
+ * 20 kHz complementary switching.  Low-side N-FETs turn on/off fast
+ * through 100 ohm direct gate drive.
+ *
+ * For each commutation step:
+ *   Source phase: high-side MASKED ON,  low-side MASKED OFF
+ *   Sink phase:   high-side MASKED OFF, low-side UNMASKED (follows PWM)
+ *   Float phase:  both MASKED OFF
  *
  * Channel bit mapping in PMEN/PMD registers (bits 5:0):
  *   Bit 0: CH0 = Phase U low-side  (P1.2)
@@ -30,108 +38,91 @@
 static uint8_t hall_offset;
 
 /*
- * Forward commutation mask tables (indexed by hall state 1-6).
+ * Forward commutation tables — low-side-only chopping.
  *
- * Hall  Sector  HI(PWM)  LO(on)   PMEN    PMD
- * ────  ──────  ───────  ──────   ──────  ──────
- *  1     0°     U_HI     V_LO     0x3C    0x08
- *  3     60°    U_HI     W_LO     0x3C    0x10
- *  2     120°   V_HI     W_LO     0x33    0x10
- *  6     180°   V_HI     U_LO     0x33    0x01
- *  4     240°   W_HI     U_LO     0x0F    0x01
- *  5     300°   W_HI     V_LO     0x0F    0x08
+ * Each step has one high-side masked ON (source), one low-side
+ * unmasked to follow PWM (sink), everything else masked OFF.
  *
- * Detail for each step:
+ * Hall  Sector  Source(DC) Sink(PWM) PMEN    PMD
+ * ────  ──────  ────────── ───────── ──────  ──────
+ *  1     0°     U_HI       V_LO      0x37    0x02
+ *  3     60°    U_HI       W_LO      0x2F    0x02
+ *  2     120°   V_HI       W_LO      0x2F    0x04
+ *  6     180°   V_HI       U_LO      0x3E    0x04
+ *  4     240°   W_HI       U_LO      0x3E    0x20
+ *  5     300°   W_HI       V_LO      0x37    0x20
  *
- * Hall=1: U_HI_PWM + V_LO_ON
- *   U: CH0/CH1 unmasked (complementary PWM) → PMEN bits 1:0 = 00
- *   V: CH2(hi)=masked LOW, CH3(lo)=masked HIGH → PMEN bits 3:2 = 11, PMD 3=1,2=0
- *   W: CH4(lo)=masked LOW, CH5(hi)=masked LOW → PMEN bits 5:4 = 11, PMD 5:4=00
- *   PMEN = 0b111100 = 0x3C, PMD = 0b001000 = 0x08
+ * Hall=1: U_HI on (CH1 masked HIGH), V_LO PWM (CH3 unmasked)
+ *   PMEN = 0b110111 = 0x37, PMD = 0b000010 = 0x02
  *
- * Hall=3: U_HI_PWM + W_LO_ON
- *   U: unmasked
- *   V: all masked LOW
- *   W: CH4(lo)=masked HIGH, CH5(hi)=masked LOW
- *   PMEN = 0x3C, PMD = 0b010000 = 0x10
+ * Hall=3: U_HI on (CH1 masked HIGH), W_LO PWM (CH4 unmasked)
+ *   PMEN = 0b101111 = 0x2F, PMD = 0b000010 = 0x02
  *
- * Hall=2: V_HI_PWM + W_LO_ON
- *   U: all masked LOW
- *   V: CH2/CH3 unmasked
- *   W: CH4(lo)=masked HIGH, CH5(hi)=masked LOW
- *   PMEN = 0b110011 = 0x33, PMD = 0b010000 = 0x10
+ * Hall=2: V_HI on (CH2 masked HIGH), W_LO PWM (CH4 unmasked)
+ *   PMEN = 0b101111 = 0x2F, PMD = 0b000100 = 0x04
  *
- * Hall=6: V_HI_PWM + U_LO_ON
- *   U: CH0(lo)=masked HIGH, CH1(hi)=masked LOW
- *   V: CH2/CH3 unmasked
- *   W: all masked LOW
- *   PMEN = 0x33, PMD = 0b000001 = 0x01
+ * Hall=6: V_HI on (CH2 masked HIGH), U_LO PWM (CH0 unmasked)
+ *   PMEN = 0b111110 = 0x3E, PMD = 0b000100 = 0x04
  *
- * Hall=4: W_HI_PWM + U_LO_ON
- *   U: CH0(lo)=masked HIGH, CH1(hi)=masked LOW
- *   V: all masked LOW
- *   W: CH4/CH5 unmasked
- *   PMEN = 0b001111 = 0x0F, PMD = 0x01
+ * Hall=4: W_HI on (CH5 masked HIGH), U_LO PWM (CH0 unmasked)
+ *   PMEN = 0b111110 = 0x3E, PMD = 0b100000 = 0x20
  *
- * Hall=5: W_HI_PWM + V_LO_ON
- *   U: all masked LOW
- *   V: CH2(hi)=masked LOW, CH3(lo)=masked HIGH
- *   W: CH4/CH5 unmasked
- *   PMEN = 0x0F, PMD = 0b001000 = 0x08
+ * Hall=5: W_HI on (CH5 masked HIGH), V_LO PWM (CH3 unmasked)
+ *   PMEN = 0b110111 = 0x37, PMD = 0b100000 = 0x20
  */
 static const uint8_t __code fwd_pmen[8] = {
     0x3F, /* 0: invalid — all masked off */
-    0x3C, /* 1: U pair active */
-    0x33, /* 2: V pair active */
-    0x3C, /* 3: U pair active */
-    0x0F, /* 4: W pair active */
-    0x0F, /* 5: W pair active */
-    0x33, /* 6: V pair active */
+    0x37, /* 1: V_LO (CH3) follows PWM */
+    0x2F, /* 2: W_LO (CH4) follows PWM */
+    0x2F, /* 3: W_LO (CH4) follows PWM */
+    0x3E, /* 4: U_LO (CH0) follows PWM */
+    0x37, /* 5: V_LO (CH3) follows PWM */
+    0x3E, /* 6: U_LO (CH0) follows PWM */
     0x3F  /* 7: invalid — all masked off */
 };
 
 static const uint8_t __code fwd_pmd[8] = {
     0x00, /* 0: invalid — all off */
-    0x08, /* 1: V_LO on (CH3) */
-    0x10, /* 2: W_LO on (CH4) */
-    0x10, /* 3: W_LO on (CH4) */
-    0x01, /* 4: U_LO on (CH0) */
-    0x08, /* 5: V_LO on (CH3) */
-    0x01, /* 6: U_LO on (CH0) */
+    0x02, /* 1: U_HI on (CH1) */
+    0x04, /* 2: V_HI on (CH2) */
+    0x02, /* 3: U_HI on (CH1) */
+    0x20, /* 4: W_HI on (CH5) */
+    0x20, /* 5: W_HI on (CH5) */
+    0x04, /* 6: V_HI on (CH2) */
     0x00  /* 7: invalid — all off */
 };
 
 /*
- * Reverse commutation: swap high-side PWM and low-side roles to reverse torque.
+ * Reverse commutation — swap source/sink roles to reverse torque.
  *
- * Hall  HI(PWM)  LO(on)   PMEN    PMD
- * ────  ───────  ──────   ──────  ──────
- *  1    V_HI     U_LO     0x33    0x01
- *  3    W_HI     U_LO     0x0F    0x01
- *  2    W_HI     V_LO     0x0F    0x08
- *  6    U_HI     V_LO     0x3C    0x08
- *  4    U_HI     W_LO     0x3C    0x10
- *  5    V_HI     W_LO     0x33    0x10
+ * Hall  Source(DC) Sink(PWM) PMEN    PMD
+ * ────  ────────── ───────── ──────  ──────
+ *  1    V_HI       U_LO      0x3E    0x04
+ *  3    W_HI       U_LO      0x3E    0x20
+ *  2    W_HI       V_LO      0x37    0x20
+ *  6    U_HI       V_LO      0x37    0x02
+ *  4    U_HI       W_LO      0x2F    0x02
+ *  5    V_HI       W_LO      0x2F    0x04
  */
 static const uint8_t __code rev_pmen[8] = {
     0x3F, /* 0: invalid */
-    0x33, /* 1: V pair active */
-    0x0F, /* 2: W pair active */
-    0x0F, /* 3: W pair active */
-    0x3C, /* 4: U pair active */
-    0x33, /* 5: V pair active */
-    0x3C, /* 6: U pair active */
+    0x3E, /* 1: U_LO (CH0) follows PWM */
+    0x37, /* 2: V_LO (CH3) follows PWM */
+    0x3E, /* 3: U_LO (CH0) follows PWM */
+    0x2F, /* 4: W_LO (CH4) follows PWM */
+    0x2F, /* 5: W_LO (CH4) follows PWM */
+    0x37, /* 6: V_LO (CH3) follows PWM */
     0x3F  /* 7: invalid */
 };
 
 static const uint8_t __code rev_pmd[8] = {
     0x00, /* 0: invalid */
-    0x01, /* 1: U_LO on (CH0) */
-    0x08, /* 2: V_LO on (CH3) */
-    0x01, /* 3: U_LO on (CH0) */
-    0x10, /* 4: W_LO on (CH4) */
-    0x10, /* 5: W_LO on (CH4) */
-    0x08, /* 6: V_LO on (CH3) */
+    0x04, /* 1: V_HI on (CH2) */
+    0x20, /* 2: W_HI on (CH5) */
+    0x20, /* 3: W_HI on (CH5) */
+    0x02, /* 4: U_HI on (CH1) */
+    0x04, /* 5: V_HI on (CH2) */
+    0x02, /* 6: U_HI on (CH1) */
     0x00  /* 7: invalid */
 };
 

@@ -67,9 +67,7 @@
 /* ── PWM Configuration ───────────────────────────────────────────────────── */
 #define PWM_FREQUENCY   20000       /* 20 kHz switching frequency */
 #define PWM_PERIOD      (FSYS / PWM_FREQUENCY)
-#define PWM_DEAD_TIME_US 2UL        /* Longer than the original 1 us, without killing low-duty pulses */
-#define PWM_DEAD_TIME   (((FSYS * PWM_DEAD_TIME_US) + 999999UL) / 1000000UL)
-#define PWM_MAX_DUTY    (PWM_PERIOD - 2 * PWM_DEAD_TIME)
+#define PWM_MAX_DUTY    (PWM_PERIOD - 1)  /* Dead-time disabled; masks prevent shoot-through */
 
 /* Default hall-to-commutation alignment, in 60 electrical degree steps. */
 #define DEFAULT_COMMUTATION_OFFSET  2
