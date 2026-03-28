@@ -1,0 +1,78 @@
+# BL4818 minimal bench firmware Makefile
+# Toolchain: SDCC targeting Nuvoton MS51FB9AE (MCS-51 / 8051)
+
+CC       = sdcc
+OBJCOPY  = sdobjcopy
+
+MCU      = mcs51
+XRAM_SIZE = 1024
+XRAM_LOC  = 0x0000
+FLASH_TOTAL_SIZE ?= 16384
+LDROM_SIZE ?= 0
+APROM_SIZE ?= 16384
+CODE_SIZE = $(APROM_SIZE)
+IRAM_SIZE = 256
+STACK_SIZE = 64
+
+INCDIR   = include
+BUILDDIR = build
+TARGET   = bl4818-bench
+
+SRCS = bench/bench_main.c src/uart.c
+RELS = $(BUILDDIR)/bench_main.rel $(BUILDDIR)/uart.rel
+IHX  = $(BUILDDIR)/$(TARGET).ihx
+BIN  = $(BUILDDIR)/$(TARGET).bin
+
+ifeq ($(OS),Windows_NT)
+MKDIR_BUILD = powershell -NoProfile -Command "if (-not (Test-Path '$(BUILDDIR)')) { New-Item -ItemType Directory '$(BUILDDIR)' | Out-Null }"
+else
+MKDIR_BUILD = mkdir -p $(BUILDDIR)
+endif
+
+CFLAGS  = -m$(MCU)
+CFLAGS += -I$(INCDIR)
+CFLAGS += --std-c11
+CFLAGS += --opt-code-size
+CFLAGS += --stack-auto
+CFLAGS += --model-small
+CFLAGS += --no-xinit-opt
+CFLAGS += -DFLASH_TOTAL_SIZE=$(FLASH_TOTAL_SIZE)
+CFLAGS += -DLDROM_SIZE=$(LDROM_SIZE)
+CFLAGS += -DAPROM_SIZE=$(APROM_SIZE)
+
+LDFLAGS  = -m$(MCU)
+LDFLAGS += --model-small
+LDFLAGS += --stack-auto
+LDFLAGS += --no-xinit-opt
+LDFLAGS += --xram-size $(XRAM_SIZE)
+LDFLAGS += --xram-loc $(XRAM_LOC)
+LDFLAGS += --code-size $(CODE_SIZE)
+LDFLAGS += --iram-size $(IRAM_SIZE)
+LDFLAGS += --stack-size $(STACK_SIZE)
+LDFLAGS += -o $(IHX)
+
+.PHONY: all clean
+
+all: $(IHX) $(BIN)
+
+$(BUILDDIR):
+	$(MKDIR_BUILD)
+
+$(BUILDDIR)/bench_main.rel: bench/bench_main.c $(wildcard $(INCDIR)/*.h) | $(BUILDDIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILDDIR)/uart.rel: src/uart.c $(wildcard $(INCDIR)/*.h) | $(BUILDDIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(IHX): $(RELS) | $(BUILDDIR)
+	$(CC) $(LDFLAGS) $(RELS)
+
+$(BIN): $(IHX)
+	$(OBJCOPY) -I ihex -O binary $< $@
+
+clean:
+ifeq ($(OS),Windows_NT)
+	powershell -NoProfile -Command "if (Test-Path '$(BUILDDIR)') { Remove-Item -Recurse -Force '$(BUILDDIR)' }"
+else
+	rm -rf $(BUILDDIR)
+endif

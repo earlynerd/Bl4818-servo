@@ -159,6 +159,6 @@ void flash_default_params(params_t *p)
     p->pid_vel_ki   = PID_VEL_KI;
     p->pid_vel_kd   = PID_VEL_KD;
     p->encoder_cpr  = ENCODER_CPR;
-    p->commutation_offset = 0;
+    p->commutation_offset = DEFAULT_COMMUTATION_OFFSET;
     p->checksum     = compute_checksum(p);
 }

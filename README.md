@@ -126,6 +126,24 @@ make flash      # Flash via Nu-Link (requires nulink-cli or openocd)
 make size       # Show flash/RAM usage
 ```
 
+For board-level gate-drive validation without the motor-control stack, build the
+minimal bench image instead:
+
+```bash
+make -f Makefile.bench
+```
+
+This produces `build/bl4818-bench.bin`, which exposes only UART1 and direct
+single-gate GPIO control for power-stage probing.
+
+Bench image commands:
+
+- `X<mask>` drive raw gate mask directly
+- `J<1..6>` drive one of the six static commutation states
+- `R` or `J0` release all gates
+- `?` or `H` report gate state plus raw hall state and hall transition count
+- `Z` reset the hall transition count
+
 ### Toolchain Notes
 
 This project uses **SDCC** (open-source) rather than Keil C51. SDCC is freely
@@ -174,6 +192,9 @@ python flash.py --recover --power-off-ms 100 \
 ```
 ├── README.md              This file
 ├── Makefile               Build system
+├── Makefile.bench         Minimal gate-drive bench image build
+├── bench/
+│   └── bench_main.c       UART + direct gate GPIO validation image
 ├── include/
 │   ├── ms51_reg.h         MS51FB9AE register definitions
 │   ├── ms51_config.h      Clock, pin, and feature configuration

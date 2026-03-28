@@ -39,7 +39,9 @@ static uint8_t  prev_hall_for_stall;
 
 /* Current measurement */
 static uint16_t current_ma;
+static uint16_t filtered_current_ma;
 static int16_t  velocity_rpm;
+static int16_t  applied_duty;
 
 /* PID controllers — in XRAM to save IRAM */
 static pid_t __xdata pid_velocity;
@@ -47,24 +49,63 @@ static pid_t __xdata pid_position;
 
 static void drive_coast(void)
 {
+    applied_duty = 0;
     pwm_set_duty(0);
     commutation_coast();
 }
 
 static void apply_drive_output(int8_t direction, uint16_t duty)
 {
+    applied_duty = (direction >= 0) ? (int16_t)duty : -(int16_t)duty;
     pwm_set_duty(duty);
     commutation_update(direction);
 }
 
 static void apply_brake_output(int8_t actual_dir)
 {
-    if (actual_dir == 0 || current_ma >= BRAKE_COAST_CURRENT_MA) {
+    if (actual_dir == 0 || filtered_current_ma >= BRAKE_COAST_CURRENT_MA) {
         drive_coast();
         return;
     }
 
     apply_drive_output((int8_t)(-actual_dir), (uint16_t)BRAKE_DUTY_LIMIT);
+}
+
+static uint8_t mode_allows_active_reversal(void)
+{
+    return (mode == MODE_VELOCITY || mode == MODE_POSITION) ? 1u : 0u;
+}
+
+static uint16_t abs16(int16_t val)
+{
+    return (val >= 0) ? (uint16_t)val : (uint16_t)(-val);
+}
+
+static int16_t slew_duty_toward(int16_t current, int16_t target,
+                                uint16_t step_up, uint16_t step_down)
+{
+    uint16_t step;
+
+    if (current == target)
+        return current;
+
+    if ((current > 0 && target < 0) || (current < 0 && target > 0)) {
+        step = step_down;
+    } else if (abs16(target) > abs16(current)) {
+        step = step_up;
+    } else {
+        step = step_down;
+    }
+
+    if (current < target) {
+        int16_t next = current + (int16_t)step;
+        return (next > target) ? target : next;
+    }
+
+    {
+        int16_t next = current - (int16_t)step;
+        return (next < target) ? target : next;
+    }
 }
 
 /* Convert hall transition period to RPM */
@@ -77,9 +118,9 @@ static uint16_t period_to_rpm(uint16_t period)
      * Mechanical RPM = electrical_freq * 60 / MOTOR_POLE_PAIRS
      *
      * RPM = 2000000 * 60 / (period * 6 * MOTOR_POLE_PAIRS)
-     *     = 120000000 / (period * 6 * 7)
-     *     = 120000000 / (period * 42)
-     *     ≈ 2857143 / period
+     * For a 5 pole-pair motor, that simplifies to:
+     *     = 120000000 / (period * 30)
+     *     = 4000000 / period
      */
     if (period == 0 || period == 0xFFFF)
         return 0;
@@ -102,7 +143,9 @@ void motor_init(void)
     stall_counter = 0;
     prev_hall_for_stall = hall_read();
     current_ma = 0;
+    filtered_current_ma = 0;
     velocity_rpm = 0;
+    applied_duty = 0;
 
     pid_init(&pid_velocity, PID_VEL_KP, PID_VEL_KI, PID_VEL_KD,
              -(int16_t)PWM_MAX_DUTY, (int16_t)PWM_MAX_DUTY);
@@ -162,6 +205,7 @@ void motor_stop(void)
 
 void motor_release(void)
 {
+    applied_duty = 0;
     commutation_coast();
     pwm_disable();
     state = MOTOR_IDLE;
@@ -169,6 +213,7 @@ void motor_release(void)
 
 void motor_clear_fault(void)
 {
+    applied_duty = 0;
     fault = FAULT_NONE;
     state = MOTOR_IDLE;
     commutation_coast();
@@ -219,6 +264,12 @@ void motor_update(void)
 
     /* Read current */
     current_ma = adc_read_current_ma();
+    if (filtered_current_ma == 0) {
+        filtered_current_ma = current_ma;
+    } else {
+        filtered_current_ma =
+            (uint16_t)(((uint32_t)filtered_current_ma * 3u + current_ma) / 4u);
+    }
 
     /* Calculate velocity from hall period */
     speed_rpm = period_to_rpm(hall_period());
@@ -268,7 +319,7 @@ void motor_update(void)
     /* Stall detection: if hall state hasn't changed for STALL_TIMEOUT_MS */
     if (state == MOTOR_RUN &&
         stall_counter > STALL_TIMEOUT_MS &&
-        current_ma > CURRENT_WARN_MA) {
+        filtered_current_ma > CURRENT_WARN_MA) {
         /* Stall detected with high current — reduce duty to prevent damage.
          * Don't fault out immediately; just limit current and keep trying.
          * This is the key improvement for servo operation at stall. */
@@ -331,7 +382,8 @@ void motor_update(void)
      * AND the motor is spinning above a threshold, initiate braking.
      * This allows seamless direction reversal for servo operation.
      */
-    if (actual_dir != 0 && actual_dir != target_direction &&
+    if (mode_allows_active_reversal() &&
+        actual_dir != 0 && actual_dir != target_direction &&
         abs_velocity > BRAKE_ENTRY_RPM) {
         state = MOTOR_REVERSING;
         apply_brake_output(actual_dir);
@@ -387,15 +439,67 @@ void motor_update(void)
      *
      * Also reduce duty during stall to prevent thermal damage.
      */
-    if (current_ma > torque_limit_ma) {
-        /* Hard limit: zero duty */
-        duty = 0;
-    } else if (current_ma > CURRENT_WARN_MA) {
-        /* Proportional reduction */
-        int32_t scale = (int32_t)(torque_limit_ma - current_ma) * 256 /
-                        (torque_limit_ma - CURRENT_WARN_MA);
-        if (scale < 0) scale = 0;
-        duty = (int16_t)((int32_t)duty * scale / 256);
+    {
+        uint16_t control_band_ma = torque_limit_ma / 4u;
+        uint16_t soft_start_ma;
+        uint16_t slew_up = PWM_MAX_DUTY / 128u;
+        uint16_t slew_down = PWM_MAX_DUTY / 64u;
+        int16_t limited_target = duty;
+
+        if (control_band_ma < 100u)
+            control_band_ma = 100u;
+        if (control_band_ma > 1000u)
+            control_band_ma = 1000u;
+        if (slew_up == 0u)
+            slew_up = 1u;
+        if (slew_down == 0u)
+            slew_down = 1u;
+
+        soft_start_ma = (torque_limit_ma > control_band_ma) ?
+            (uint16_t)(torque_limit_ma - control_band_ma) : 0u;
+
+        if (current_ma >= torque_limit_ma && abs16(applied_duty) > 0u) {
+            /*
+             * Use the instantaneous shunt reading for fast pull-down when the
+             * requested limit is exceeded, then let the filtered path handle
+             * recovery. This keeps low T-values from overshooting badly.
+             */
+            limited_target = (int16_t)(((int32_t)applied_duty * torque_limit_ma) /
+                                       (int32_t)current_ma);
+
+            if (limited_target == applied_duty) {
+                if (limited_target > 0)
+                    limited_target--;
+                else if (limited_target < 0)
+                    limited_target++;
+            }
+
+            slew_down = PWM_MAX_DUTY / 32u;
+            if (slew_down == 0u)
+                slew_down = 1u;
+        } else if (filtered_current_ma >= torque_limit_ma && abs16(applied_duty) > 0u) {
+            /*
+             * Trim the already-applied duty back toward the requested shunt limit
+             * instead of dropping straight to zero every millisecond.
+             */
+            limited_target = (int16_t)(((int32_t)applied_duty * torque_limit_ma) /
+                                       (int32_t)filtered_current_ma);
+
+            if (limited_target == applied_duty) {
+                if (limited_target > 0)
+                    limited_target--;
+                else if (limited_target < 0)
+                    limited_target++;
+            }
+        } else if (filtered_current_ma > soft_start_ma) {
+            /*
+             * Near the requested limit, only let duty rise slowly so the current
+             * loop can settle without audible on/off chopping.
+             */
+            slew_up = 1u;
+        }
+
+        duty = slew_duty_toward(applied_duty, limited_target, slew_up, slew_down);
     }
 
     /* Stall current limiting */
@@ -421,6 +525,5 @@ void motor_update(void)
     }
 
     target_direction = dir;
-    pwm_set_duty(abs_duty);
-    commutation_update(dir);
+    apply_drive_output(dir, abs_duty);
 }

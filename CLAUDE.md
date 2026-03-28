@@ -15,7 +15,7 @@ make flash        # Flash via Nu-Link programmer (nulink_8051_fwupdate)
 make size         # Show flash/RAM usage
 ```
 
-Prerequisites: SDCC 4.2+, GNU Make. Flashing requires a Nuvoton Nu-Link programmer.
+Prerequisites: SDCC 4.2+, GNU Make. Flashing enabled with in-repo icp bridge project and script.
 
 ## Architecture
 
@@ -34,7 +34,7 @@ Key modules and their roles:
 - `uart.c` — UART1 (not UART0, which conflicts with ADC pins) at 115200 baud on the programming header. Interrupt-driven with 64-byte ring buffers.
 - `protocol.c` — ASCII command parser: P/V/T/D for targets, S/R for stop/release, ? for status query, G/W for parameter get/set.
 - `flash.c` — IAP for non-volatile parameter storage (mode, PID gains, torque limit, encoder CPR).
-- `encoder.c` — Quadrature decoder (currently unpopulated on the board, code ready).
+- `encoder.c` — Quadrature decoder (currently not implemented).
 
 ## Hardware Constraints
 
@@ -43,6 +43,7 @@ Key modules and their roles:
 - **SDCC quirks**: Use `__sfr`, `__sbit`, `__xdata`, `__idata`, `__code` keywords. ISRs use `__interrupt(N)` syntax. SFR page switching needed for PWM4/5 duty registers.
 - **main.c must link first** (Makefile enforces this) for correct 8051 startup code placement.
 - All 6 gate drives are **active-high** from the MCU (high-side P-FETs use an inverting N-FET driver stage on the board).
+- some of the high/low pairs are swapped compared to the other phases. this must be dealt with in teh commutation phase table, not by direct inversion of gate drive signals (doesnt respect deadtime)
 - UART0 pins (P0.6/P0.7) are used for ADC, so serial uses UART1 on the programming header.
 
 ## Configuration

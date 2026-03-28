@@ -119,7 +119,8 @@ void pwm_init(void)
 
     /*
      * ── Dead-Time ────────────────────────────────────────────────────
-     * 1µs dead-time at 24 MHz = 24 counts.
+     * Dead-time is configured via PWM_DEAD_TIME_US.
+     * At 24 MHz and 2 us, PDTCNT = 48 counts.
      * PDTCNT is TA-protected. PDTEN enables per pair.
      *
      * This is the critical safety feature: hardware guarantees that
@@ -127,7 +128,7 @@ void pwm_init(void)
      * if firmware has bugs.
      */
     TIMED_ACCESS();
-    PDTCNT = PWM_DEAD_TIME;    /* 24 counts = 1µs */
+    PDTCNT = PWM_DEAD_TIME;
     TIMED_ACCESS();
     PDTEN = 0x07;              /* Enable DT for all 3 pairs: CH01, CH23, CH45 */
 

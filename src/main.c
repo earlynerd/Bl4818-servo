@@ -135,10 +135,10 @@ static void sys_init(void)
 {
     /*
      * HIRC defaults to 16 MHz after reset.
-     * TODO: switch to 24 MHz by reading factory trim from UID area.
-     * For now, run at 16 MHz (FSYS must match in ms51_config.h).
+     * Switch to 24 MHz HIRC with no divider before enabling
+     * timing-sensitive peripherals like UART and PWM.
      */
-    CKDIV = 0x00;       /* No divider: FSYS = FOSC = 16 MHz */
+    SET_HIRC_24MHZ();
 
     /* Configure direction input pin: P1.4 (pin 11) */
     P1M1 |=  0x10;   /* P1.4 M1=1 (input) */

@@ -295,6 +295,8 @@ __sbit __at(0xEF) ADCF;
 /* ── Clock Configuration ─────────────────────────────────────────────────── */
 #define SET_HIRC_24MHZ() do { \
     TIMED_ACCESS(); \
+    RCTRIM1 |= 0x10;   /* Select HIRC24 using the current trim setting */ \
+    TIMED_ACCESS(); \
     CKSWT = 0x00;  /* HIRC as system clock */ \
     CKDIV = 0x00;  /* No divider */ \
 } while(0)

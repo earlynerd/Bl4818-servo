@@ -62,13 +62,17 @@
 #endif
 
 /* ── System Clock ────────────────────────────────────────────────────────── */
-#define FSYS            16000000UL  /* 16 MHz HIRC (default after reset) */
+#define FSYS            24000000UL  /* 24 MHz HIRC selected at startup */
 
 /* ── PWM Configuration ───────────────────────────────────────────────────── */
 #define PWM_FREQUENCY   20000       /* 20 kHz switching frequency */
 #define PWM_PERIOD      (FSYS / PWM_FREQUENCY)
-#define PWM_DEAD_TIME   ((FSYS + 999999UL) / 1000000UL)  /* ~1 us dead time */
+#define PWM_DEAD_TIME_US 2UL        /* Longer than the original 1 us, without killing low-duty pulses */
+#define PWM_DEAD_TIME   (((FSYS * PWM_DEAD_TIME_US) + 999999UL) / 1000000UL)
 #define PWM_MAX_DUTY    (PWM_PERIOD - 2 * PWM_DEAD_TIME)
+
+/* Default hall-to-commutation alignment, in 60 electrical degree steps. */
+#define DEFAULT_COMMUTATION_OFFSET  2
 
 /* ── Pin Assignments — CONFIRMED ─────────────────────────────────────────── */
 
@@ -156,8 +160,8 @@
 /* #define LED_PIN      P13 */  /* Could use spare pin 12 if LED added */
 
 /* ── Motor Parameters ────────────────────────────────────────────────────── */
-#define MOTOR_POLE_PAIRS    7       /* BL4818 = 14 poles / 7 pole pairs */
-#define HALL_STATES_PER_REV (6 * MOTOR_POLE_PAIRS)  /* 42 states/mech rev */
+#define MOTOR_POLE_PAIRS    5       /* BL4818 = 10 poles / 5 pole pairs */
+#define HALL_STATES_PER_REV (6 * MOTOR_POLE_PAIRS)  /* 30 states/mech rev */
 
 /* ── Current Sensing — CONFIRMED ──────────────────────────────────────── */
 /* Shunt: 2512 package, marked "R020" = 20 milliohm (0.020Ω)             */
