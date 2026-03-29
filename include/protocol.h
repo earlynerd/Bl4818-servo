@@ -10,5 +10,6 @@
 
 void protocol_init(void);
 void protocol_poll(void);
+void protocol_tick_1khz(void);
 
 #endif /* PROTOCOL_H */

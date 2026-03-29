@@ -20,8 +20,8 @@ Master TX -> Dev0 RX -> Dev0 TX -> Dev1 RX -> ... -> DevN TX -> Master RX
 Only one transaction should be in flight at a time. The master sends one packet,
 waits for the transformed packet or response to return, then sends the next.
 
-The current production firmware emits one boot marker byte (`'!'`) after UART
-startup. Masters should clear any pending input before the first transaction.
+The firmware does not emit unsolicited protocol bytes at boot. The line stays
+quiet until the master starts a transaction.
 
 ## Scope
 

@@ -60,10 +60,6 @@ void main(void)
 
     EA = 1;
 
-#if FEATURE_UART
-    uart_putc('!');
-#endif
-
     while (1) {
         motor_poll_fast();
 
@@ -72,6 +68,7 @@ void main(void)
             TH1 = (65536 - (FSYS / 12 / CONTROL_LOOP_HZ)) >> 8;
             TL1 = (65536 - (FSYS / 12 / CONTROL_LOOP_HZ)) & 0xFF;
 
+            protocol_tick_1khz();
             tach_debug_tick();
             motor_update();
             wdt_feed();

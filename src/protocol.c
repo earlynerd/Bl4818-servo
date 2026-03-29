@@ -37,6 +37,7 @@
 #define PROTO_MAX_ADDRESSED_DEV   16u
 
 #define PROTO_CRC8_INIT           0x00u
+#define PROTO_FRAME_TIMEOUT_MS    5u
 
 #define PROTO_CMD_SET_DUTY        0x01u
 #define PROTO_CMD_SET_TORQUE      0x02u
@@ -74,8 +75,15 @@ static uint8_t rx_targeted;
 static uint8_t rx_crc;
 static uint8_t rx_broadcast_consume;
 static uint8_t rx_broadcast_tx_pos;
+static uint8_t rx_timeout_ms;
 static uint16_t rx_forward_remaining;
 static uint8_t __xdata rx_broadcast_tx[PROTO_BROADCAST_FRAME_MAX];
+
+static void protocol_restart_timeout(void)
+{
+    if (rx_state != PROTO_RX_IDLE)
+        rx_timeout_ms = PROTO_FRAME_TIMEOUT_MS;
+}
 
 static uint8_t crc8_update(uint8_t crc, uint8_t data)
 {
@@ -193,6 +201,7 @@ static void protocol_reset(void)
     rx_crc = PROTO_CRC8_INIT;
     rx_broadcast_consume = 0;
     rx_broadcast_tx_pos = 0;
+    rx_timeout_ms = 0;
     rx_forward_remaining = 0;
 }
 
@@ -203,16 +212,36 @@ void protocol_init(void)
     protocol_reset();
 }
 
+void protocol_tick_1khz(void)
+{
+    if (rx_state == PROTO_RX_IDLE || rx_timeout_ms == 0u)
+        return;
+
+    rx_timeout_ms--;
+    if (rx_timeout_ms == 0u)
+        protocol_reset();
+}
+
 void protocol_poll(void)
 {
+    if (uart_rx_overflowed()) {
+        uart_rx_flush();
+        protocol_reset();
+        return;
+    }
+
     while (uart_available()) {
         uint8_t c = (uint8_t)uart_getc();
+
+        if (rx_state != PROTO_RX_IDLE)
+            protocol_restart_timeout();
 
         switch (rx_state) {
         case PROTO_RX_IDLE:
             if (c == PROTO_SYNC_ENUM) {
                 rx_crc = crc8_update(PROTO_CRC8_INIT, c);
                 rx_state = PROTO_RX_ENUM_COUNTER;
+                protocol_restart_timeout();
                 break;
             }
 
@@ -220,12 +249,14 @@ void protocol_poll(void)
                 uart_putc(c);
                 rx_forward_remaining = PROTO_STATUS_TAIL_SIZE;
                 rx_state = PROTO_RX_STATUS_FORWARD;
+                protocol_restart_timeout();
                 break;
             }
 
             if (c == PROTO_SYNC_BROADCAST) {
                 rx_crc = crc8_update(PROTO_CRC8_INIT, c);
                 rx_state = PROTO_RX_BROADCAST_COUNT;
+                protocol_restart_timeout();
                 break;
             }
 
@@ -238,6 +269,7 @@ void protocol_poll(void)
                     uart_putc(c);
 
                 rx_state = PROTO_RX_ADDR_CMD;
+                protocol_restart_timeout();
             }
             break;
 
@@ -371,6 +403,12 @@ void protocol_poll(void)
         default:
             protocol_reset();
             break;
+        }
+
+        if (uart_rx_overflowed()) {
+            uart_rx_flush();
+            protocol_reset();
+            return;
         }
     }
 }
