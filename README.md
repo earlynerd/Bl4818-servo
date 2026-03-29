@@ -236,6 +236,7 @@ Safety warning:
 - This firmware accepts direct duty / torque commands and does not yet enforce a proven safe operating area for sustained stall, locked-rotor, or repeated high-load low-speed operation.
 - Present protections are limited to a soft current pullback, a hard overcurrent fault, local-input ramping, and bounded local retries. Those help, but they are not a guarantee that the board, motor, or wiring cannot be overheated or damaged.
 - A commanded full-duty stall can still be destructive, especially if an external master raises the torque limit or repeatedly re-applies command after fault recovery.
+- The watchdog is only a hang-recovery mechanism. It can reset the MCU if the firmware stops making progress, but it does not by itself limit a still-running control loop that is actively commanding a bad operating point.
 - Until a better thermal / `I^2t` style derate exists, test with a current-limited supply and conservative torque / duty settings.
 
 Legacy `PWM+DIR` input notes:

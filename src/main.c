@@ -32,6 +32,8 @@ static void timer1_init(void);
 static void timer2_init(void);
 static void wdt_init(void);
 static void wdt_feed(void);
+static void wdt_write(uint8_t value);
+static void wdt_set_bits(uint8_t mask);
 static void tach_init(void);
 static void tach_debug_tick(void);
 static void local_input_poll_fast(void);
@@ -67,7 +69,9 @@ static volatile uint16_t local_pwm_period_ticks;
 
 void main(void)
 {
+    wdt_feed();
     sys_init();
+    wdt_init();
     adc_init();
     hall_init();
     commutation_init();
@@ -82,7 +86,7 @@ void main(void)
 
     timer1_init();
     timer2_init();
-    wdt_init();
+    wdt_feed();
 
     EA = 1;
 
@@ -175,16 +179,39 @@ static void timer2_init(void)
     T2CON |= 0x04;  /* TR2 = 1 */
 }
 
+static void wdt_write(uint8_t value)
+{
+    uint8_t saved_ea = EA;
+
+    EA = 0;
+    TIMED_ACCESS();
+    WDCON = value;
+    EA = saved_ea;
+}
+
+static void wdt_set_bits(uint8_t mask)
+{
+    uint8_t saved_ea = EA;
+
+    EA = 0;
+    TIMED_ACCESS();
+    WDCON |= mask;
+    EA = saved_ea;
+}
+
 static void wdt_init(void)
 {
-    TIMED_ACCESS();
-    WDCON = 0x07;
+#if FEATURE_WATCHDOG
+    wdt_write((uint8_t)(WDCON_WDTEN | (WDT_PRESCALER_BITS & WDCON_WPS_MASK)));
+    wdt_feed();
+#endif
 }
 
 static void wdt_feed(void)
 {
-    TIMED_ACCESS();
-    WDCON |= 0x40;
+#if FEATURE_WATCHDOG
+    wdt_set_bits(WDCON_WDCLR);
+#endif
 }
 
 static void tach_init(void)

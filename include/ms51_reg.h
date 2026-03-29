@@ -72,6 +72,12 @@ __sfr __at(0xC6) RH3;      /* Page 0 (shares C6 with PIOCON1 on page 1) */
 
 /* ── Watchdog Timer ──────────────────────────────────────────────────────── */
 __sfr __at(0xAA) WDCON;    /* TA protected */
+#define WDCON_WDTEN   0x80u
+#define WDCON_WDCLR   0x40u
+#define WDCON_WDTF    0x20u
+#define WDCON_WIDPD   0x10u
+#define WDCON_WDTRF   0x08u
+#define WDCON_WPS_MASK 0x07u
 
 /* ── Interrupt Registers ─────────────────────────────────────────────────── */
 /*     IE  at 0xA8 (declared above) */

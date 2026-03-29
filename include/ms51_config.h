@@ -207,6 +207,12 @@
 
 /* ── Timing ──────────────────────────────────────────────────────────────── */
 #define CONTROL_LOOP_HZ     1000    /* 1 kHz control loop */
+#define FEATURE_WATCHDOG    1U      /* Reset if the main loop stops reaching the control tick */
+#define WDT_PRESCALER_BITS  7U      /* Longest watchdog interval */
+
+#if WDT_PRESCALER_BITS > 7U
+#error "WDT_PRESCALER_BITS must be in the range 0..7."
+#endif
 
 /* ── Legacy Local Inputs ─────────────────────────────────────────────────── */
 #define FEATURE_LOCAL_PWM_INPUT    1       /* PWM+DIR active until serial enumeration */
