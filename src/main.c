@@ -26,6 +26,7 @@
 #include <stdint.h>
 
 /* Forward declarations */
+static void clock_init(void);
 static void sys_init(void);
 static void timer1_init(void);
 static void timer2_init(void);
@@ -80,13 +81,41 @@ void main(void)
 
 static void sys_init(void)
 {
-    SET_HIRC_24MHZ();
+    clock_init();
 
     /* Direction input pin: P1.4 */
     P1M1 |=  0x10;
     P1M2 &= ~0x10;
 
     tach_init();
+}
+
+static void clock_init(void)
+{
+#if HIRC_TRIM_OFFSET_LSB != 0
+    uint16_t trim = ((uint16_t)RCTRIM0 << 1) | (uint16_t)(RCTRIM1 & 0x01u);
+
+#if HIRC_TRIM_OFFSET_LSB > 0
+    if (trim > (uint16_t)(0x01FFu - (uint16_t)HIRC_TRIM_OFFSET_LSB)) {
+        trim = 0x01FFu;
+    } else {
+        trim += (uint16_t)HIRC_TRIM_OFFSET_LSB;
+    }
+#else
+    if (trim < (uint16_t)(-(HIRC_TRIM_OFFSET_LSB))) {
+        trim = 0u;
+    } else {
+        trim -= (uint16_t)(-(HIRC_TRIM_OFFSET_LSB));
+    }
+#endif
+
+    TIMED_ACCESS();
+    RCTRIM0 = (uint8_t)(trim >> 1);
+    TIMED_ACCESS();
+    RCTRIM1 = (uint8_t)((RCTRIM1 & 0xFEu) | (trim & 0x01u));
+#endif
+
+    SET_HIRC_24MHZ();
 }
 
 static void timer1_init(void)
