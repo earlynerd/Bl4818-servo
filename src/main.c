@@ -40,6 +40,7 @@ void capture_isr(void) __interrupt(INT_CAPTURE);
 
 #if FEATURE_LOCAL_PWM_INPUT
 static void local_input_init(void);
+static void local_input_stop_motion(void);
 static void local_input_release(void);
 static void local_input_lock_out(void);
 static void local_input_capture_enable(void);
@@ -209,6 +210,15 @@ static void tach_debug_tick(void)
 }
 
 #if FEATURE_LOCAL_PWM_INPUT
+static void local_input_stop_motion(void)
+{
+    local_applied_abs_duty = 0;
+    motor_set_duty(0);
+
+    if (motor_get_state() == MOTOR_RUN)
+        motor_stop();
+}
+
 static void local_input_release(void)
 {
     uint8_t saved_ea = EA;
@@ -226,10 +236,7 @@ static void local_input_release(void)
     local_pwm_period_ticks = 0;
     EA = saved_ea;
 
-    motor_set_duty(0);
-
-    if (motor_get_state() == MOTOR_RUN)
-        motor_stop();
+    local_input_stop_motion();
 }
 
 static void local_input_lock_out(void)
@@ -339,6 +346,11 @@ static void local_input_update(void)
     }
 
     if (timeout_ms == 0u || valid_cycles < 2u || period_ticks == 0u) {
+        if (input_active) {
+            local_input_stop_motion();
+            return;
+        }
+
         local_fault_retry_count = 0;
         local_fault_retry_ms = 0;
         local_input_release();
