@@ -49,6 +49,11 @@ Main calls:
 
 Every addressed command returns the device's fixed-length status frame.
 
+Current production firmware default:
+
+- Ring UART baud: `250000`
+- USB monitor baud in the example projects: `115200`
+
 ## Example
 
 See [`examples/RingRoundRobin/RingRoundRobin.ino`](examples/RingRoundRobin/RingRoundRobin.ino).

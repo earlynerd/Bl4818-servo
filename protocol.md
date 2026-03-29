@@ -5,7 +5,7 @@ This document describes the UART protocol implemented by the firmware in
 
 Default line settings:
 
-- `115200` baud
+- `250000` baud
 - `8N1`
 - UART1 on the programming header pads: `P = TX`, `S = RX`
 

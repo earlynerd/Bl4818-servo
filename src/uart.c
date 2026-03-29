@@ -74,8 +74,8 @@ void uart_init(uint32_t baudrate)
      * Baud = FSYS / (16 × Pre-scale × (65536 - [RH3:RL3]))
      *   with SMOD_1=1 and Pre-scale=1 (T3PS=000).
      *
-     * For 115200 @ 24MHz: reload = 65536 - 13 = 65523 = 0xFFF3
-     * Actual = 24000000 / (16 × 13) = 115384.6 (0.16% error)
+     * For 250000 @ 24MHz: reload = 65536 - 6 = 65530 = 0xFFFA
+     * Actual = 24000000 / (16 × 6) = 250000.0 (0.00% error)
      *
      * T3CON bit layout (C4H, page 0):
      *   [7] SMOD_1  [6] SMOD0_1  [5] BRCK  [4] TF3

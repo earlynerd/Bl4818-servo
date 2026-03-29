@@ -9,7 +9,7 @@
  *   Timer 1 — 1 kHz tick for control loop timing
  *   Timer 2 — Free-running counter for speed measurement
  *   Timer 3 — UART baud rate generator
- *   UART1   — Binary ring serial interface (115200 baud, on prog header)
+ *   UART1   — Binary ring serial interface (250000 baud, on prog header)
  *   ADC     — Current sensing (polled in control loop)
  *   GPIO    — Hall sensors (polled)
  */
@@ -40,7 +40,7 @@ void main(void)
     pwm_init();
 
 #if FEATURE_UART
-    uart_init(115200);
+    uart_init(UART_BAUD);
     protocol_init();
 #endif
 

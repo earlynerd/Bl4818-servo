@@ -226,7 +226,7 @@ python flash.py --recover --power-off-ms 100 \
 
 ## Serial Protocol
 
-Default: 115200 baud, 8N1 on UART1.
+Default: 250000 baud, 8N1 on UART1.
 
 The production firmware now uses a binary ring protocol only:
 
@@ -238,6 +238,10 @@ The separate bench firmware keeps the ASCII bring-up commands.
 
 See [protocol.md](protocol.md) for the wire format, transaction model, and examples.
 
+For direct host-side validation of the binary protocol, use `ring_tool.py`.
+It can enumerate, send broadcast duty packets, issue addressed commands, and
+run a repeated broadcast-plus-status validation loop over a PC serial port.
+
 ## RP2350 Master Library
 
 An Arduino-Pico / PlatformIO master-side library now lives in
@@ -245,6 +249,7 @@ An Arduino-Pico / PlatformIO master-side library now lives in
 
 - Library: `host/arduino-pico/BL4818RingMaster`
 - Example project targeting Pico 2 W (`rpipico2w`): `host/arduino-pico/rpipico2w-master-example`
+- Single-actuator AS5047 closed-loop testbench: `host/arduino-pico/rpipico2w-single-actuator-testbench`
 
 ### Hall Sequence Bring-Up
 

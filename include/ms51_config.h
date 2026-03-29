@@ -153,6 +153,7 @@
 /* UART1 pins (on programming header — alternative serial port) */
 #define UART1_TX_PIN    P16     /* P1.6 pin 8  - UART1_TXD / prog "P" */
 #define UART1_RX_PIN    P02     /* P0.2 pin 18 - UART1_RXD / prog "S" */
+#define UART_BAUD       250000UL
 
 /* LED — no dedicated LED pin identified; stock board may not have one */
 /* #define LED_PIN      P13 */  /* Could use spare pin 12 if LED added */

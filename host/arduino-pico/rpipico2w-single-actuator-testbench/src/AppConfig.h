@@ -1,0 +1,39 @@
+#pragma once
+
+#include <Arduino.h>
+
+namespace AppConfig {
+
+constexpr uint32_t kUsbBaud = 115200;
+
+constexpr uint8_t kRingTxPin = 4;
+constexpr uint8_t kRingRxPin = 5;
+constexpr uint32_t kRingBaud = 250000;
+constexpr uint8_t kControlledAddress = 0;
+constexpr uint16_t kDefaultTorqueLimitMa = 2500;
+
+constexpr uint8_t kSpiMisoPin = 16;
+constexpr uint8_t kSpiCsPin = 17;
+constexpr uint8_t kSpiSckPin = 18;
+constexpr uint8_t kSpiMosiPin = 19;
+constexpr uint32_t kSpiClockHz = 2000000;
+constexpr uint8_t kSpiMode = 1;
+constexpr uint8_t kEncoderCount = 1;
+
+constexpr uint32_t kControlRateHz = 1000;
+constexpr uint32_t kControlPeriodUs = 1000000UL / kControlRateHz;
+constexpr float kControlDt = 1.0f / static_cast<float>(kControlRateHz);
+
+constexpr uint32_t kStatusPollPeriodMs = 25;
+constexpr uint32_t kTelemetryPeriodMs = 50;
+
+constexpr float kDefaultHomeTargetDeg = 0.0f;
+constexpr float kDefaultStrikeTargetDeg = 35.0f;
+constexpr uint32_t kDefaultTapHoldMs = 35;
+
+constexpr float kDefaultKp = 10.0f;
+constexpr float kDefaultKd = 0.04f;
+constexpr float kDefaultVelocityAlpha = 0.2f;
+constexpr int16_t kDefaultMaxDuty = 350;
+
+}  // namespace AppConfig
