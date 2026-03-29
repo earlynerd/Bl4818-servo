@@ -49,10 +49,10 @@
 	reti
 
 	.org 0x005B
-	ljmp	_capture_isr
+	reti
 
 	.org 0x0063
-	reti
+	ljmp	_capture_isr
 
 	.org 0x006B
 	reti
