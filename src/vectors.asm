@@ -7,6 +7,7 @@
 	.module vectors
 
 	.globl __sdcc_gsinit_startup
+	.globl _capture_isr
 	.globl _uart1_isr
 
 	.area CABS (ABS,CODE)
@@ -48,7 +49,7 @@
 	reti
 
 	.org 0x005B
-	reti
+	ljmp	_capture_isr
 
 	.org 0x0063
 	reti

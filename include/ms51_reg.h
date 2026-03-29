@@ -38,6 +38,9 @@ __sfr __at(0xF0) B;
 
 /* ── SFR Page Select and Timed Access ────────────────────────────────────── */
 __sfr __at(0x91) SFRS;     /* TA protected — SFR page select */
+__sfr __at(0x92) CAPCON0;  /* Capture control/flags */
+__sfr __at(0x93) CAPCON1;  /* Capture edge selection */
+__sfr __at(0x94) CAPCON2;  /* Capture falling-edge enable */
 __sfr __at(0xC7) TA;       /* Timed access protection register */
 
 /* ── Clock Configuration ─────────────────────────────────────────────────── */
@@ -99,8 +102,14 @@ __sfr __at(0xE1) ADCCON1;  /* STADCPX|ADCDIV1:0|ETGTYP1:0|ADCEX|ADCEN */
 __sfr __at(0xE2) ADCCON2;  /* ADFBEN|ADCMPOP|ADCMPEN|ADCMPO|ADCAQT2:0|ADCDLY.8 */
 __sfr __at(0xC2) ADCRL;    /* ADC result low byte (page 0) */
 __sfr __at(0xC3) ADCRH;    /* ADC result high byte (page 0) */
+__sfr __at(0xE4) C0L;      /* Capture 0 low byte */
+__sfr __at(0xE5) C0H;      /* Capture 0 high byte */
+__sfr __at(0xE6) C1L;      /* Capture 1 low byte */
+__sfr __at(0xE7) C1H;      /* Capture 1 high byte */
 __sfr __at(0xE3) ADCDLY;   /* ADC trigger delay */
 __sfr __at(0xF6) AINDIDS;  /* Analog input digital input disable */
+__sfr __at(0xED) C2L;      /* Capture 2 low byte */
+__sfr __at(0xEE) C2H;      /* Capture 2 high byte */
 
 /* ── PWM Module — Page 0 (primary) ───────────────────────────────────────── */
 __sfr __at(0xD8) PWMCON0;  /* Bit-addressable: PWMRUN|LOAD|PWMF|CLRPWM|0000 */
@@ -146,6 +155,8 @@ __sfr __at(0xBF) I2TOC;
 __sfr __at(0xF3) SPCR;
 __sfr __at(0xF4) SPSR;
 __sfr __at(0xF5) SPDR;
+__sfr __at(0xF1) CAPCON3;  /* Capture input selection for CAP0/CAP1 */
+__sfr __at(0xF2) CAPCON4;  /* Capture input selection for CAP2 */
 
 /* ── Brown-out Detect ────────────────────────────────────────────────────── */
 __sfr __at(0xA3) BODCON0;  /* TA protected */

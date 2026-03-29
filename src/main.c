@@ -7,7 +7,7 @@
  * Architecture:
  *   PWM0    — Low-side-only chopping (20 kHz, 6 channels)
  *   Timer 1 — 1 kHz tick for control loop timing
- *   Timer 2 — Free-running counter for speed measurement
+ *   Timer 2 — Free-running capture counter for hall timing and local PWM input
  *   Timer 3 — UART baud rate generator
  *   UART1   — Binary ring serial interface (250000 baud, on prog header)
  *   ADC     — Current sensing (polled in control loop)
@@ -34,9 +34,30 @@ static void wdt_init(void);
 static void wdt_feed(void);
 static void tach_init(void);
 static void tach_debug_tick(void);
+static void local_input_poll_fast(void);
+static void local_input_update(void);
+void capture_isr(void) __interrupt(INT_CAPTURE);
+
+#if FEATURE_LOCAL_PWM_INPUT
+static void local_input_init(void);
+static void local_input_release(void);
+static void local_input_lock_out(void);
+static void local_input_capture_enable(void);
+static void local_input_capture_disable(void);
+#endif
 
 #if FEATURE_TACH_DEBUG
 static uint8_t tach_debug_ticks;
+#endif
+
+#if FEATURE_LOCAL_PWM_INPUT
+static volatile uint8_t local_input_locked_out;
+static volatile uint8_t local_pwm_seen_rise;
+static volatile uint8_t local_pwm_valid_cycles;
+static volatile uint8_t local_pwm_timeout_ms;
+static volatile uint16_t local_pwm_last_rise;
+static volatile uint16_t local_pwm_high_ticks;
+static volatile uint16_t local_pwm_period_ticks;
 #endif
 
 void main(void)
@@ -62,6 +83,7 @@ void main(void)
 
     while (1) {
         motor_poll_fast();
+        local_input_poll_fast();
 
         if (TF1) {
             TF1 = 0;
@@ -70,6 +92,7 @@ void main(void)
 
             protocol_tick_1khz();
             tach_debug_tick();
+            local_input_update();
             motor_update();
             wdt_feed();
         }
@@ -87,6 +110,10 @@ static void sys_init(void)
     /* Direction input pin: P1.4 */
     P1M1 |=  0x10;
     P1M2 &= ~0x10;
+
+#if FEATURE_LOCAL_PWM_INPUT
+    local_input_init();
+#endif
 
     tach_init();
 }
@@ -127,7 +154,15 @@ static void timer1_init(void)
 static void timer2_init(void)
 {
     T2CON = 0x00;
+#if FEATURE_LOCAL_PWM_INPUT
+    /*
+     * Timer2 capture mode, CAP0 load source, prescale /16.
+     * Derived from the vendor TIMER2_CAP0_Capture_Mode + TIMER2_DIV_16 setup.
+     */
+    T2MOD = 0xA9;
+#else
     T2MOD = 0x00;
+#endif
     TL2 = 0;
     TH2 = 0;
     RCMP2L = 0;
@@ -166,5 +201,185 @@ static void tach_debug_tick(void)
         tach_debug_ticks = 0;
         TACH_PIN = !TACH_PIN;
     }
+#endif
+}
+
+#if FEATURE_LOCAL_PWM_INPUT
+static void local_input_release(void)
+{
+    uint8_t saved_ea = EA;
+
+    EA = 0;
+    local_pwm_last_rise = 0;
+    local_pwm_seen_rise = 0;
+    local_pwm_valid_cycles = 0;
+    local_pwm_timeout_ms = 0;
+    local_pwm_high_ticks = 0;
+    local_pwm_period_ticks = 0;
+    EA = saved_ea;
+
+    motor_set_duty(0);
+
+    if (motor_get_state() == MOTOR_RUN)
+        motor_stop();
+}
+
+static void local_input_lock_out(void)
+{
+    local_input_locked_out = 1;
+    local_input_capture_disable();
+    local_input_release();
+}
+
+static void local_input_capture_enable(void)
+{
+    /* CAP0 on IC3/P0.4, capture both edges, enable falling-edge latch. */
+    CAPCON3 = (uint8_t)((CAPCON3 & (uint8_t)~0x0Fu) | 0x04u);
+    CAPCON1 = (uint8_t)((CAPCON1 & (uint8_t)~0x03u) | 0x02u);
+    CAPCON2 = (uint8_t)((CAPCON2 & (uint8_t)~0x70u) | 0x10u);
+    CAPCON0 = (uint8_t)((CAPCON0 & (uint8_t)~0x77u) | 0x10u);
+    TF2 = 0;
+    EIE |= 0x04u;
+}
+
+static void local_input_capture_disable(void)
+{
+    EIE &= (uint8_t)~0x04u;
+    CAPCON0 &= (uint8_t)~0x10u;
+    CAPCON2 &= (uint8_t)~0x10u;
+    CAPCON0 &= (uint8_t)~0x01u;
+    TF2 = 0;
+}
+
+static void local_input_init(void)
+{
+    /* PWM speed input pin: P0.4 */
+    P0M1 |=  0x10;
+    P0M2 &= ~0x10;
+
+    local_input_locked_out = 0;
+    local_pwm_last_rise = 0;
+    local_pwm_seen_rise = 0;
+    local_pwm_valid_cycles = 0;
+    local_pwm_timeout_ms = 0;
+    local_pwm_high_ticks = 0;
+    local_pwm_period_ticks = 0;
+    local_input_capture_enable();
+}
+
+static void local_input_poll_fast(void)
+{
+    if (local_input_locked_out)
+        return;
+
+    if (protocol_is_enumerated())
+        local_input_lock_out();
+}
+
+static void local_input_update(void)
+{
+    uint8_t saved_ea;
+    uint8_t timeout_ms;
+    uint8_t valid_cycles;
+    uint32_t scaled_duty;
+    uint16_t high_ticks;
+    uint16_t period_ticks;
+    uint16_t pulse_ticks;
+    uint16_t abs_duty;
+    int16_t signed_duty;
+    uint8_t dir_positive;
+
+    if (local_input_locked_out)
+        return;
+
+    if (protocol_is_enumerated()) {
+        local_input_lock_out();
+        return;
+    }
+
+    saved_ea = EA;
+    EA = 0;
+    if (local_pwm_timeout_ms != 0u)
+        local_pwm_timeout_ms--;
+    timeout_ms = local_pwm_timeout_ms;
+    valid_cycles = local_pwm_valid_cycles;
+    high_ticks = local_pwm_high_ticks;
+    period_ticks = local_pwm_period_ticks;
+    EA = saved_ea;
+
+    if (timeout_ms == 0u || valid_cycles < 2u || period_ticks == 0u) {
+        local_input_release();
+        return;
+    }
+
+    pulse_ticks = high_ticks;
+#if LOCAL_PWM_ACTIVE_LOW
+    pulse_ticks = (uint16_t)(period_ticks - high_ticks);
+#endif
+
+    scaled_duty = (uint32_t)pulse_ticks * (uint32_t)PWM_MAX_DUTY;
+    abs_duty = (uint16_t)(scaled_duty / period_ticks);
+
+    if (abs_duty <= LOCAL_PWM_MIN_DUTY_COUNTS) {
+        local_input_release();
+        return;
+    }
+
+    if (abs_duty > PWM_MAX_DUTY)
+        abs_duty = PWM_MAX_DUTY;
+
+    dir_positive = DIR_PIN ? 1u : 0u;
+#if LOCAL_PWM_DIR_INVERT
+    dir_positive = dir_positive ? 0u : 1u;
+#endif
+
+    signed_duty = dir_positive ? (int16_t)abs_duty : -(int16_t)abs_duty;
+    motor_set_duty(signed_duty);
+
+    if (motor_get_state() == MOTOR_IDLE)
+        motor_start();
+}
+#else
+static void local_input_poll_fast(void) { }
+static void local_input_update(void) { }
+#endif
+
+void capture_isr(void) __interrupt(INT_CAPTURE)
+{
+#if FEATURE_LOCAL_PWM_INPUT
+    if (CAPCON0 & 0x01u) {
+        uint16_t captured = (uint16_t)(((uint16_t)C0H << 8) | C0L);
+        uint16_t period;
+        uint8_t level = PWM_IN_PIN ? 1u : 0u;
+
+        CAPCON0 &= (uint8_t)~0x01u;
+        TF2 = 0;
+
+        if (local_input_locked_out)
+            return;
+
+        local_pwm_timeout_ms = LOCAL_PWM_TIMEOUT_MS;
+
+        if (level) {
+            if (local_pwm_seen_rise) {
+                period = (uint16_t)(captured - local_pwm_last_rise);
+                if (period != 0u && local_pwm_high_ticks < period) {
+                    local_pwm_period_ticks = period;
+                    if (local_pwm_valid_cycles < 2u)
+                        local_pwm_valid_cycles++;
+                } else {
+                    local_pwm_valid_cycles = 0;
+                }
+            }
+
+            local_pwm_last_rise = captured;
+            local_pwm_seen_rise = 1u;
+        } else if (local_pwm_seen_rise) {
+            local_pwm_high_ticks = (uint16_t)(captured - local_pwm_last_rise);
+        }
+    }
+#else
+    CAPCON0 &= (uint8_t)~0x01u;
+    TF2 = 0;
 #endif
 }

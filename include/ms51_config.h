@@ -207,6 +207,13 @@
 /* ── Timing ──────────────────────────────────────────────────────────────── */
 #define CONTROL_LOOP_HZ     1000    /* 1 kHz control loop */
 
+/* ── Legacy Local Inputs ─────────────────────────────────────────────────── */
+#define FEATURE_LOCAL_PWM_INPUT    1       /* PWM+DIR active until serial enumeration */
+#define LOCAL_PWM_ACTIVE_LOW       1U      /* Pull-up on P0.4: idle/high = zero torque */
+#define LOCAL_PWM_TIMEOUT_MS       50U     /* Stop if PWM edges disappear */
+#define LOCAL_PWM_MIN_DUTY_COUNTS  4U      /* Treat near-zero input as stop */
+#define LOCAL_PWM_DIR_INVERT       0U      /* 0: DIR high = forward */
+
 /* ── Feature Toggles ─────────────────────────────────────────────────────── */
 #define FEATURE_UART        1       /* Enable UART command interface */
 #define FEATURE_TACH_DEBUG  1       /* Toggle tach pin from control-loop timing */

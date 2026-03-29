@@ -23,6 +23,13 @@ waits for the transformed packet or response to return, then sends the next.
 The firmware does not emit unsolicited protocol bytes at boot. The line stays
 quiet until the master starts a transaction.
 
+Legacy local PWM+direction control remains available only while the node is
+still unassigned. The first valid enumeration packet claims a serial address,
+stops any locally driven motion, and hands command ownership to the serial
+protocol until the next reboot. On the stock board, the legacy PWM input is
+treated as active-low because `P0.4` has a pull-up to 5 V, so idle/high maps to
+zero torque.
+
 ## Scope
 
 This document describes the production firmware protocol only. The production

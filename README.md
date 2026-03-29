@@ -216,6 +216,7 @@ The production firmware now uses a binary ring protocol only:
 - Broadcast duty updates
 - Addressed commands with fixed-length status responses
 - CRC-8 on every production frame, plus no broadcast slot consumption before enumeration
+- Legacy PWM+DIR input only before enumeration; first successful enumerate stops the motor and hands control to serial until reboot
 
 The separate bench firmware keeps the ASCII bring-up commands.
 
@@ -224,6 +225,17 @@ See [protocol.md](protocol.md) for the wire format, transaction model, and examp
 For direct host-side validation of the binary protocol, use `ring_tool.py`.
 It can enumerate, send broadcast duty packets, issue addressed commands, and
 run a repeated broadcast-plus-status validation loop over a PC serial port.
+
+Legacy `PWM+DIR` input notes:
+
+- Before enumeration, `P0.4` PWM plus `P1.4` direction can still drive the motor.
+- `P0.4` is treated as active-low because the board has a pull-up to 5 V. Idle/high means zero torque, which makes a floating or disconnected command input fail safe.
+- PWM edges on `P0.4` are timestamped by Timer2 capture hardware rather than by software polling.
+- The first valid enumerate packet stops any locally driven motion and hands ownership to serial until reboot.
+- This path expects a real PWM signal, not a static DC level. If PWM edges disappear for more than `50 ms`, the command drops to zero.
+- Recommended PWM frequency is `50 Hz` to `2 kHz`. There is little benefit above `1 kHz` because the command is still applied on the `1 kHz` control tick.
+- Timer2 runs with a `/16` prescale in this mode, so at `24 MHz` the capture timestamp granularity is about `0.67 us` and the 16-bit counter spans about `43 ms`, which comfortably covers `50 Hz` PWM.
+- Because the edge timestamp is latched in hardware, ISR latency does not directly add measurement jitter. In practice the duty precision is now set mainly by timer quantization and input signal cleanliness, not by foreground firmware load.
 
 ## RP2350 Master Library
 

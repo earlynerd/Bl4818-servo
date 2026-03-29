@@ -64,7 +64,7 @@ typedef enum {
     PROTO_RX_BROADCAST_CRC
 } proto_rx_state_t;
 
-static uint8_t device_addr;
+static uint8_t device_addr = PROTO_ADDR_UNASSIGNED;
 static proto_rx_state_t rx_state;
 static uint8_t rx_addr;
 static uint8_t rx_cmd;
@@ -220,6 +220,11 @@ void protocol_tick_1khz(void)
     rx_timeout_ms--;
     if (rx_timeout_ms == 0u)
         protocol_reset();
+}
+
+uint8_t protocol_is_enumerated(void)
+{
+    return (device_addr != PROTO_ADDR_UNASSIGNED) ? 1u : 0u;
 }
 
 void protocol_poll(void)
