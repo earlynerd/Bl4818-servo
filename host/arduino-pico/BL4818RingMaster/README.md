@@ -9,6 +9,9 @@ PlatformIO. The intended use is:
 2. Send one broadcast duty packet each control cycle.
 3. Poll one device status per cycle in round-robin order.
 
+Every production frame includes a CRC-8 trailer, and broadcast packets are only
+consumed after enumeration.
+
 ## PlatformIO
 
 For a Pico 2 W project, use the exact PlatformIO board ID `rpipico2w`.
@@ -47,7 +50,7 @@ Main calls:
 - `stop(address, &status)`
 - `clearFault(address, &status)`
 
-Every addressed command returns the device's fixed-length status frame.
+Every addressed command returns the device's fixed-length status frame with CRC.
 
 Current production firmware default:
 

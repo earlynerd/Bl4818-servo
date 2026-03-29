@@ -73,8 +73,10 @@ void BL4818RingMaster::clearInput()
 
 bool BL4818RingMaster::enumerate(uint8_t &deviceCount)
 {
-    uint8_t packet[2] = {kSyncEnumerate, 0x00};
-    uint8_t response[2];
+    uint8_t packet[3] = {kSyncEnumerate, 0x00, 0x00};
+    uint8_t response[3];
+
+    packet[2] = crc8(packet, 2);
 
     clearInput();
 
@@ -86,7 +88,7 @@ bool BL4818RingMaster::enumerate(uint8_t &deviceCount)
         return false;
     }
 
-    if (response[0] != kSyncEnumerate) {
+    if (response[0] != kSyncEnumerate || response[2] != crc8(response, 2)) {
         setError(Error::BadResponse);
         return false;
     }
@@ -102,7 +104,7 @@ bool BL4818RingMaster::enumerate(uint8_t &deviceCount)
 bool BL4818RingMaster::broadcastDuty(const int16_t *duties, uint8_t count)
 {
     uint8_t packet[kMaxBroadcastFrameSize];
-    uint8_t response[2];
+    uint8_t response[3];
     uint8_t index;
 
     if (!requireEnumerated()) {
@@ -123,9 +125,11 @@ bool BL4818RingMaster::broadcastDuty(const int16_t *duties, uint8_t count)
         packet[3 + (2 * index)] = static_cast<uint8_t>(rawDuty & 0xFF);
     }
 
+    packet[2 + (2 * count)] = crc8(packet, static_cast<size_t>(2 + (2 * count)));
+
     clearInput();
 
-    if (!writeExact(packet, static_cast<size_t>(2 + (2 * count)))) {
+    if (!writeExact(packet, static_cast<size_t>(3 + (2 * count)))) {
         return false;
     }
 
@@ -133,7 +137,7 @@ bool BL4818RingMaster::broadcastDuty(const int16_t *duties, uint8_t count)
         return false;
     }
 
-    if (response[0] != kSyncBroadcast || response[1] != 0x00) {
+    if (response[0] != kSyncBroadcast || response[1] != 0x00 || response[2] != crc8(response, 2)) {
         setError(Error::BadResponse);
         return false;
     }
@@ -248,6 +252,26 @@ bool BL4818RingMaster::readExact(uint8_t *data, size_t length)
     return true;
 }
 
+uint8_t BL4818RingMaster::crc8(const uint8_t *data, size_t length) const
+{
+    uint8_t crc = 0;
+
+    while (length-- > 0) {
+        uint8_t bit;
+
+        crc ^= *data++;
+        for (bit = 0; bit < 8; ++bit) {
+            if (crc & 0x80) {
+                crc = static_cast<uint8_t>((crc << 1) ^ 0x07);
+            } else {
+                crc <<= 1;
+            }
+        }
+    }
+
+    return crc;
+}
+
 bool BL4818RingMaster::readStatus(Status &status)
 {
     uint8_t frame[kStatusFrameSize];
@@ -256,7 +280,7 @@ bool BL4818RingMaster::readStatus(Status &status)
         return false;
     }
 
-    if (frame[0] != kSyncStatus) {
+    if (frame[0] != kSyncStatus || frame[6] != crc8(frame, 6)) {
         setError(Error::BadResponse);
         return false;
     }
@@ -271,8 +295,8 @@ bool BL4818RingMaster::readStatus(Status &status)
 
 bool BL4818RingMaster::sendAddressed(uint8_t address, Command command, const uint8_t *payload, uint8_t payloadLength, Status *status)
 {
-    uint8_t packet[4];
-    uint8_t packetLength = static_cast<uint8_t>(2 + payloadLength);
+    uint8_t packet[5];
+    uint8_t packetLength = static_cast<uint8_t>(3 + payloadLength);
     Status localStatus;
 
     if (!requireEnumerated()) {
@@ -290,6 +314,8 @@ bool BL4818RingMaster::sendAddressed(uint8_t address, Command command, const uin
     if (payloadLength > 0) {
         memcpy(&packet[2], payload, payloadLength);
     }
+
+    packet[2 + payloadLength] = crc8(packet, static_cast<size_t>(2 + payloadLength));
 
     clearInput();
 

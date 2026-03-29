@@ -43,7 +43,19 @@ CMD_CLEAR_FAULT = 0x04
 CMD_QUERY_STATUS = 0x10
 
 MAX_DEVICES = 16
-STATUS_FRAME_SIZE = 6
+STATUS_FRAME_SIZE = 7
+
+
+def crc8(data: bytes) -> int:
+    crc = 0
+    for value in data:
+        crc ^= value
+        for _ in range(8):
+            if crc & 0x80:
+                crc = ((crc << 1) ^ 0x07) & 0xFF
+            else:
+                crc = (crc << 1) & 0xFF
+    return crc
 
 
 class RingError(Exception):
@@ -90,9 +102,12 @@ class BL4818RingClient:
         self.ser.reset_input_buffer()
 
     def enumerate(self) -> int:
-        response = self._transaction(bytes((SYNC_ENUMERATE, 0x00)), 2)
+        packet = bytes((SYNC_ENUMERATE, 0x00))
+        response = self._transaction(packet + bytes((crc8(packet),)), 3)
         if response[0] != SYNC_ENUMERATE:
             raise RingError(f"bad enumerate response sync: 0x{response[0]:02X}")
+        if response[2] != crc8(response[:2]):
+            raise RingError(f"bad enumerate crc: {response.hex(' ')}")
 
         self.device_count = response[1]
         return self.device_count
@@ -107,10 +122,13 @@ class BL4818RingClient:
         payload = bytearray((SYNC_BROADCAST, len(duty_list)))
         for duty in duty_list:
             payload.extend(self._pack_i16(duty))
+        payload.append(crc8(bytes(payload)))
 
-        response = self._transaction(bytes(payload), 2)
-        if response != bytes((SYNC_BROADCAST, 0x00)):
+        response = self._transaction(bytes(payload), 3)
+        if response[:2] != bytes((SYNC_BROADCAST, 0x00)):
             raise RingError(f"bad broadcast echo: {response.hex(' ')}")
+        if response[2] != crc8(response[:2]):
+            raise RingError(f"bad broadcast crc: {response.hex(' ')}")
 
     def set_duty(self, address: int, duty: int) -> MotorStatus:
         return self._send_addressed(address, CMD_SET_DUTY, self._pack_i16(duty))
@@ -131,7 +149,8 @@ class BL4818RingClient:
 
     def _send_addressed(self, address: int, cmd: int, payload: bytes) -> MotorStatus:
         self._validate_address(address)
-        packet = bytes((SYNC_ADDRESS_BASE | address, cmd)) + payload
+        frame = bytes((SYNC_ADDRESS_BASE | address, cmd)) + payload
+        packet = frame + bytes((crc8(frame),))
         response = self._transaction(packet, STATUS_FRAME_SIZE)
         return self._parse_status(response)
 
@@ -188,6 +207,8 @@ class BL4818RingClient:
             raise RingError(f"expected {STATUS_FRAME_SIZE} status bytes, got {len(frame)}")
         if frame[0] != SYNC_STATUS:
             raise RingError(f"bad status sync: 0x{frame[0]:02X}")
+        if frame[6] != crc8(frame[:6]):
+            raise RingError(f"bad status crc: {frame.hex(' ')}")
 
         return MotorStatus(
             state=frame[1],

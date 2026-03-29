@@ -3,19 +3,19 @@
  *
  * The production firmware accepts only the binary ring protocol:
  *
- *   0x7F [counter]
+ *   0x7F [counter] [crc8]
  *       Enumerate. Each device claims the current counter as its address,
  *       increments it, and forwards the packet.
  *
- *   0xFF [slots] [d0_hi] [d0_lo] ...
+ *   0xFF [slots] [d0_hi] [d0_lo] ... [crc8]
  *       Broadcast duty update. Each device decrements slots, consumes the
  *       first duty pair for itself, and forwards the remaining pairs.
  *
- *   [0x80 | addr] [cmd] [payload...]
+ *   [0x80 | addr] [cmd] [payload...] [crc8]
  *       Addressed command. The addressed device swallows the command,
  *       executes it, and emits a fixed status response:
  *
- *   0x7E [state] [fault] [cur_hi] [cur_lo] [hall]
+ *   0x7E [state] [fault] [cur_hi] [cur_lo] [hall] [crc8]
  *
  * The bench firmware retains the separate ASCII debug protocol.
  */
@@ -36,24 +36,31 @@
 #define PROTO_ADDR_UNASSIGNED     0xFFu
 #define PROTO_MAX_ADDRESSED_DEV   16u
 
+#define PROTO_CRC8_INIT           0x00u
+
 #define PROTO_CMD_SET_DUTY        0x01u
 #define PROTO_CMD_SET_TORQUE      0x02u
 #define PROTO_CMD_STOP            0x03u
 #define PROTO_CMD_CLEAR_FAULT     0x04u
 #define PROTO_CMD_QUERY_STATUS    0x10u
 
-#define PROTO_STATUS_PAYLOAD_SIZE 5u
+#define PROTO_STATUS_DATA_SIZE    5u
+#define PROTO_STATUS_TAIL_SIZE    (PROTO_STATUS_DATA_SIZE + 1u)
+#define PROTO_BROADCAST_FRAME_MAX (2u + (2u * PROTO_MAX_ADDRESSED_DEV) + 1u)
 
 typedef enum {
     PROTO_RX_IDLE = 0,
     PROTO_RX_ENUM_COUNTER,
+    PROTO_RX_ENUM_CRC,
     PROTO_RX_ADDR_CMD,
     PROTO_RX_ADDR_PAYLOAD,
+    PROTO_RX_ADDR_CRC,
     PROTO_RX_STATUS_FORWARD,
     PROTO_RX_BROADCAST_COUNT,
     PROTO_RX_BROADCAST_DUTY_HI,
     PROTO_RX_BROADCAST_DUTY_LO,
-    PROTO_RX_BROADCAST_FORWARD
+    PROTO_RX_BROADCAST_FORWARD,
+    PROTO_RX_BROADCAST_CRC
 } proto_rx_state_t;
 
 static uint8_t device_addr;
@@ -64,18 +71,71 @@ static uint8_t rx_payload[2];
 static uint8_t rx_payload_len;
 static uint8_t rx_payload_pos;
 static uint8_t rx_targeted;
+static uint8_t rx_crc;
+static uint8_t rx_broadcast_consume;
+static uint8_t rx_broadcast_tx_pos;
 static uint16_t rx_forward_remaining;
+static uint8_t __xdata rx_broadcast_tx[PROTO_BROADCAST_FRAME_MAX];
+
+static uint8_t crc8_update(uint8_t crc, uint8_t data)
+{
+    uint8_t bit;
+
+    crc ^= data;
+
+    for (bit = 0; bit < 8u; bit++) {
+        if (crc & 0x80u) {
+            crc = (uint8_t)((crc << 1) ^ 0x07u);
+        } else {
+            crc <<= 1;
+        }
+    }
+
+    return crc;
+}
+
+static uint8_t broadcast_tx_crc(void)
+{
+    uint8_t crc = PROTO_CRC8_INIT;
+    uint8_t i;
+
+    for (i = 0; i < rx_broadcast_tx_pos; i++)
+        crc = crc8_update(crc, rx_broadcast_tx[i]);
+
+    return crc;
+}
+
+static void send_broadcast_tx(void)
+{
+    uint8_t i;
+
+    for (i = 0; i < rx_broadcast_tx_pos; i++)
+        uart_putc(rx_broadcast_tx[i]);
+
+    uart_putc(broadcast_tx_crc());
+}
 
 static void send_status_binary(void)
 {
     uint16_t current = motor_get_current();
+    uint8_t state = (uint8_t)motor_get_state();
+    uint8_t fault = (uint8_t)motor_get_fault();
+    uint8_t hall = hall_read();
+    uint8_t crc = PROTO_CRC8_INIT;
 
+    crc = crc8_update(crc, PROTO_SYNC_STATUS);
     uart_putc(PROTO_SYNC_STATUS);
-    uart_putc((uint8_t)motor_get_state());
-    uart_putc((uint8_t)motor_get_fault());
+    crc = crc8_update(crc, state);
+    uart_putc(state);
+    crc = crc8_update(crc, fault);
+    uart_putc(fault);
+    crc = crc8_update(crc, (uint8_t)(current >> 8));
     uart_putc((uint8_t)(current >> 8));
+    crc = crc8_update(crc, (uint8_t)(current & 0xFFu));
     uart_putc((uint8_t)(current & 0xFFu));
-    uart_putc(hall_read());
+    crc = crc8_update(crc, hall);
+    uart_putc(hall);
+    uart_putc(crc);
 }
 
 static uint8_t command_payload_len(uint8_t cmd)
@@ -130,6 +190,9 @@ static void protocol_reset(void)
     rx_payload_len = 0;
     rx_payload_pos = 0;
     rx_targeted = 0;
+    rx_crc = PROTO_CRC8_INIT;
+    rx_broadcast_consume = 0;
+    rx_broadcast_tx_pos = 0;
     rx_forward_remaining = 0;
 }
 
@@ -148,19 +211,20 @@ void protocol_poll(void)
         switch (rx_state) {
         case PROTO_RX_IDLE:
             if (c == PROTO_SYNC_ENUM) {
-                uart_putc(PROTO_SYNC_ENUM);
+                rx_crc = crc8_update(PROTO_CRC8_INIT, c);
                 rx_state = PROTO_RX_ENUM_COUNTER;
                 break;
             }
 
             if (c == PROTO_SYNC_STATUS) {
                 uart_putc(c);
-                rx_forward_remaining = PROTO_STATUS_PAYLOAD_SIZE;
+                rx_forward_remaining = PROTO_STATUS_TAIL_SIZE;
                 rx_state = PROTO_RX_STATUS_FORWARD;
                 break;
             }
 
             if (c == PROTO_SYNC_BROADCAST) {
+                rx_crc = crc8_update(PROTO_CRC8_INIT, c);
                 rx_state = PROTO_RX_BROADCAST_COUNT;
                 break;
             }
@@ -168,6 +232,7 @@ void protocol_poll(void)
             if ((c & PROTO_SYNC_ADDR_MASK) == PROTO_SYNC_ADDR_BASE) {
                 rx_addr = c & 0x0Fu;
                 rx_targeted = (device_addr != PROTO_ADDR_UNASSIGNED && rx_addr == device_addr) ? 1u : 0u;
+                rx_crc = crc8_update(PROTO_CRC8_INIT, c);
 
                 if (!rx_targeted)
                     uart_putc(c);
@@ -177,8 +242,23 @@ void protocol_poll(void)
             break;
 
         case PROTO_RX_ENUM_COUNTER:
-            device_addr = (c < PROTO_MAX_ADDRESSED_DEV) ? c : PROTO_ADDR_UNASSIGNED;
-            uart_putc((uint8_t)(c + 1u));
+            rx_payload[0] = c;
+            rx_crc = crc8_update(rx_crc, c);
+            rx_state = PROTO_RX_ENUM_CRC;
+            break;
+
+        case PROTO_RX_ENUM_CRC:
+            if (c == rx_crc && rx_payload[0] < PROTO_MAX_ADDRESSED_DEV) {
+                uint8_t next = (uint8_t)(rx_payload[0] + 1u);
+                uint8_t forward_crc = PROTO_CRC8_INIT;
+
+                device_addr = rx_payload[0];
+                uart_putc(PROTO_SYNC_ENUM);
+                uart_putc(next);
+                forward_crc = crc8_update(forward_crc, PROTO_SYNC_ENUM);
+                forward_crc = crc8_update(forward_crc, next);
+                uart_putc(forward_crc);
+            }
             protocol_reset();
             break;
 
@@ -190,6 +270,7 @@ void protocol_poll(void)
 
         case PROTO_RX_ADDR_CMD:
             rx_cmd = c;
+            rx_crc = crc8_update(rx_crc, c);
             rx_payload_len = command_payload_len(rx_cmd);
             rx_payload_pos = 0;
 
@@ -197,9 +278,7 @@ void protocol_poll(void)
                 uart_putc(c);
 
             if (rx_payload_len == 0u) {
-                if (rx_targeted)
-                    execute_addressed_command();
-                protocol_reset();
+                rx_state = PROTO_RX_ADDR_CRC;
             } else {
                 rx_state = PROTO_RX_ADDR_PAYLOAD;
             }
@@ -210,49 +289,83 @@ void protocol_poll(void)
                 rx_payload[rx_payload_pos] = c;
 
             rx_payload_pos++;
+            rx_crc = crc8_update(rx_crc, c);
 
             if (!rx_targeted)
                 uart_putc(c);
 
-            if (rx_payload_pos >= rx_payload_len) {
-                if (rx_targeted)
-                    execute_addressed_command();
-                protocol_reset();
-            }
+            if (rx_payload_pos >= rx_payload_len)
+                rx_state = PROTO_RX_ADDR_CRC;
+            break;
+
+        case PROTO_RX_ADDR_CRC:
+            if (!rx_targeted)
+                uart_putc(c);
+
+            if (c == rx_crc && rx_targeted)
+                execute_addressed_command();
+            protocol_reset();
             break;
 
         case PROTO_RX_BROADCAST_COUNT:
-            uart_putc(PROTO_SYNC_BROADCAST);
-            uart_putc((uint8_t)(c ? (c - 1u) : 0u));
+            if (c > PROTO_MAX_ADDRESSED_DEV) {
+                protocol_reset();
+                break;
+            }
+
+            rx_crc = crc8_update(rx_crc, c);
+            rx_broadcast_consume = (device_addr != PROTO_ADDR_UNASSIGNED && c != 0u) ? 1u : 0u;
+            rx_broadcast_tx[0] = PROTO_SYNC_BROADCAST;
+            rx_broadcast_tx[1] = rx_broadcast_consume ? (uint8_t)(c - 1u) : c;
+            rx_broadcast_tx_pos = 2;
 
             if (c == 0u) {
-                protocol_reset();
-            } else {
+                rx_state = PROTO_RX_BROADCAST_CRC;
+            } else if (rx_broadcast_consume) {
                 rx_forward_remaining = (uint16_t)(2u * (uint16_t)(c - 1u));
                 rx_state = PROTO_RX_BROADCAST_DUTY_HI;
+            } else {
+                rx_forward_remaining = (uint16_t)(2u * (uint16_t)c);
+                rx_state = PROTO_RX_BROADCAST_FORWARD;
             }
             break;
 
         case PROTO_RX_BROADCAST_DUTY_HI:
             rx_payload[0] = c;
+            rx_crc = crc8_update(rx_crc, c);
             rx_state = PROTO_RX_BROADCAST_DUTY_LO;
             break;
 
         case PROTO_RX_BROADCAST_DUTY_LO:
             rx_payload[1] = c;
-            execute_set_duty((int16_t)(((uint16_t)rx_payload[0] << 8) | rx_payload[1]));
+            rx_crc = crc8_update(rx_crc, c);
 
             if (rx_forward_remaining == 0u) {
-                protocol_reset();
+                rx_state = PROTO_RX_BROADCAST_CRC;
             } else {
                 rx_state = PROTO_RX_BROADCAST_FORWARD;
             }
             break;
 
         case PROTO_RX_BROADCAST_FORWARD:
-            uart_putc(c);
+            if (rx_broadcast_tx_pos < sizeof(rx_broadcast_tx))
+                rx_broadcast_tx[rx_broadcast_tx_pos] = c;
+
+            rx_broadcast_tx_pos++;
+            rx_crc = crc8_update(rx_crc, c);
+
             if (--rx_forward_remaining == 0u)
-                protocol_reset();
+                rx_state = PROTO_RX_BROADCAST_CRC;
+            break;
+
+        case PROTO_RX_BROADCAST_CRC:
+            if (c == rx_crc) {
+                if (rx_broadcast_consume)
+                    execute_set_duty((int16_t)(((uint16_t)rx_payload[0] << 8) | rx_payload[1]));
+
+                send_broadcast_tx();
+            }
+            protocol_reset();
             break;
 
         default:

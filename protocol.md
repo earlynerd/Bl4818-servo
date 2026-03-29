@@ -20,8 +20,8 @@ Master TX -> Dev0 RX -> Dev0 TX -> Dev1 RX -> ... -> DevN TX -> Master RX
 Only one transaction should be in flight at a time. The master sends one packet,
 waits for the transformed packet or response to return, then sends the next.
 
-The firmware never transmits unsolicited bytes at boot. That matters in a ring:
-the line stays quiet until the master starts a transaction.
+The current production firmware emits one boot marker byte (`'!'`) after UART
+startup. Masters should clear any pending input before the first transaction.
 
 ## Scope
 
@@ -42,29 +42,34 @@ and gate-drive probing.
 
 The current implementation supports addressed device IDs `0..15`.
 
+All production frames end with a CRC-8 byte. The CRC uses polynomial `0x07`,
+initial value `0x00`, no reflection, and no final XOR. Devices ignore bad
+enumeration, addressed, or broadcast frames rather than acting on them.
+
 ## Enumeration
 
 Master sends:
 
 ```text
-[0x7F] [0x00]
+[0x7F] [0x00] [crc]
 ```
 
 Each device:
 
 1. Stores the current counter as its address.
 2. Increments the counter by one.
-3. Forwards the updated 2-byte packet.
+3. Recomputes the CRC.
+4. Forwards the updated 3-byte packet.
 
 Example with four devices:
 
 ```text
-Master TX: [7F] [00]
-Dev0 TX:   [7F] [01]
-Dev1 TX:   [7F] [02]
-Dev2 TX:   [7F] [03]
-Dev3 TX:   [7F] [04]
-Master RX: [7F] [04]
+Master TX: [7F] [00] [crc]
+Dev0 TX:   [7F] [01] [crc]
+Dev1 TX:   [7F] [02] [crc]
+Dev2 TX:   [7F] [03] [crc]
+Dev3 TX:   [7F] [04] [crc]
+Master RX: [7F] [04] [crc]
 ```
 
 `0x04` means there are four devices addressed `0..3`.
@@ -74,7 +79,7 @@ Master RX: [7F] [04]
 The fast path is a duty broadcast:
 
 ```text
-[0xFF] [slot_count] [d0_hi] [d0_lo] [d1_hi] [d1_lo] ...
+[0xFF] [slot_count] [d0_hi] [d0_lo] [d1_hi] [d1_lo] ... [crc]
 ```
 
 `slot_count` is the number of remaining duty slots in the packet, including the
@@ -85,19 +90,21 @@ gaps to find packet boundaries.
 Per-device behavior:
 
 1. Read `slot_count`.
-2. Forward `[0xFF] [slot_count - 1]`.
-3. Consume the first signed 16-bit duty pair for this device.
-4. Forward the remaining `2 * (slot_count - 1)` bytes unchanged.
+2. If the device has been enumerated, consume the first signed 16-bit duty pair
+   for itself, decrement `slot_count`, recompute CRC, and forward the remaining
+   packet.
+3. If the device is still unassigned, forward the broadcast unchanged. That
+   prevents startup noise from commanding motion before enumeration.
 
 Example for four devices:
 
 ```text
-Master TX: [FF] [04] [d0h] [d0l] [d1h] [d1l] [d2h] [d2l] [d3h] [d3l]
-Dev0 TX:   [FF] [03] [d1h] [d1l] [d2h] [d2l] [d3h] [d3l]
-Dev1 TX:   [FF] [02] [d2h] [d2l] [d3h] [d3l]
-Dev2 TX:   [FF] [01] [d3h] [d3l]
-Dev3 TX:   [FF] [00]
-Master RX: [FF] [00]
+Master TX: [FF] [04] [d0h] [d0l] [d1h] [d1l] [d2h] [d2l] [d3h] [d3l] [crc]
+Dev0 TX:   [FF] [03] [d1h] [d1l] [d2h] [d2l] [d3h] [d3l] [crc]
+Dev1 TX:   [FF] [02] [d2h] [d2l] [d3h] [d3l] [crc]
+Dev2 TX:   [FF] [01] [d3h] [d3l] [crc]
+Dev3 TX:   [FF] [00] [crc]
+Master RX: [FF] [00] [crc]
 ```
 
 Notes:
@@ -106,14 +113,14 @@ Notes:
 - Valid range is `-PWM_MAX_DUTY .. +PWM_MAX_DUTY`.
 - The firmware applies the duty and calls `motor_start()`, matching the existing
   ASCII `D<val>` behavior.
-- Devices beyond `slot_count` just forward `[0xFF] [0x00]` unchanged.
+- Devices beyond `slot_count` just forward `[0xFF] [0x00] [crc]` unchanged.
 
 ## Addressed Commands
 
 Format:
 
 ```text
-[0x80 | addr] [cmd] [payload...]
+[0x80 | addr] [cmd] [payload...] [crc]
 ```
 
 Supported commands:
@@ -137,7 +144,7 @@ completion marker for both queries and configuration writes.
 Format:
 
 ```text
-[0x7E] [state] [fault] [cur_hi] [cur_lo] [hall]
+[0x7E] [state] [fault] [cur_hi] [cur_lo] [hall] [crc]
 ```
 
 Fields:
@@ -150,8 +157,8 @@ Fields:
 Example:
 
 ```text
-Master TX: [83] [10]
-Master RX: [7E] [01] [00] [01] [F4] [03]
+Master TX: [83] [10] [crc]
+Master RX: [7E] [01] [00] [01] [F4] [03] [crc]
 ```
 
 That means:

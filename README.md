@@ -233,6 +233,7 @@ The production firmware now uses a binary ring protocol only:
 - Enumeration
 - Broadcast duty updates
 - Addressed commands with fixed-length status responses
+- CRC-8 on every production frame, plus no broadcast slot consumption before enumeration
 
 The separate bench firmware keeps the ASCII bring-up commands.
 

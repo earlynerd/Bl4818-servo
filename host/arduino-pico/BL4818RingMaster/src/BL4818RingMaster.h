@@ -62,8 +62,9 @@ public:
 
 private:
     static constexpr uint8_t kBroadcastHeaderSize = 2;
-    static constexpr uint8_t kStatusFrameSize = 6;
-    static constexpr uint8_t kMaxBroadcastFrameSize = kBroadcastHeaderSize + (2 * kMaxDevices);
+    static constexpr uint8_t kCrcSize = 1;
+    static constexpr uint8_t kStatusFrameSize = 7;
+    static constexpr uint8_t kMaxBroadcastFrameSize = kBroadcastHeaderSize + (2 * kMaxDevices) + kCrcSize;
 
     Stream &io_;
     uint32_t timeoutMs_;
@@ -77,6 +78,7 @@ private:
     bool validateAddress(uint8_t address) const;
     bool writeExact(const uint8_t *data, size_t length);
     bool readExact(uint8_t *data, size_t length);
+    uint8_t crc8(const uint8_t *data, size_t length) const;
     bool readStatus(Status &status);
     bool sendAddressed(uint8_t address, Command command, const uint8_t *payload, uint8_t payloadLength, Status *status);
 };
