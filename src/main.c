@@ -55,6 +55,7 @@ static volatile uint8_t local_input_locked_out;
 static uint8_t local_pwm_dc_hold_ms;
 static uint8_t local_fault_retry_count;
 static uint16_t local_fault_retry_ms;
+static uint16_t local_applied_abs_duty;
 static volatile uint8_t local_pwm_seen_rise;
 static volatile uint8_t local_pwm_valid_cycles;
 static volatile uint8_t local_pwm_timeout_ms;
@@ -220,6 +221,7 @@ static void local_input_release(void)
     local_pwm_dc_hold_ms = 0;
     local_fault_retry_count = 0;
     local_fault_retry_ms = 0;
+    local_applied_abs_duty = 0;
     local_pwm_high_ticks = 0;
     local_pwm_period_ticks = 0;
     EA = saved_ea;
@@ -271,6 +273,7 @@ static void local_input_init(void)
     local_pwm_dc_hold_ms = 0;
     local_fault_retry_count = 0;
     local_fault_retry_ms = 0;
+    local_applied_abs_duty = 0;
     local_pwm_high_ticks = 0;
     local_pwm_period_ticks = 0;
     local_input_capture_enable();
@@ -291,6 +294,7 @@ static void local_input_update(void)
     uint8_t saved_ea;
     uint8_t timeout_ms;
     uint8_t valid_cycles;
+    uint16_t desired_abs_duty;
     uint32_t scaled_duty;
     uint16_t high_ticks;
     uint16_t period_ticks;
@@ -330,7 +334,7 @@ static void local_input_update(void)
     EA = saved_ea;
 
     if (local_pwm_dc_hold_ms >= LOCAL_PWM_DC_FULLSCALE_MS) {
-        abs_duty = PWM_MAX_DUTY;
+        desired_abs_duty = PWM_MAX_DUTY;
         goto apply_local_command;
     }
 
@@ -347,19 +351,29 @@ static void local_input_update(void)
 #endif
 
     scaled_duty = (uint32_t)pulse_ticks * (uint32_t)PWM_MAX_DUTY;
-    abs_duty = (uint16_t)(scaled_duty / period_ticks);
+    desired_abs_duty = (uint16_t)(scaled_duty / period_ticks);
 
-    if (abs_duty <= LOCAL_PWM_MIN_DUTY_COUNTS) {
+    if (desired_abs_duty <= LOCAL_PWM_MIN_DUTY_COUNTS) {
         local_fault_retry_count = 0;
         local_fault_retry_ms = 0;
         local_input_release();
         return;
     }
 
-    if (abs_duty > PWM_MAX_DUTY)
-        abs_duty = PWM_MAX_DUTY;
+    if (desired_abs_duty > PWM_MAX_DUTY)
+        desired_abs_duty = PWM_MAX_DUTY;
 
 apply_local_command:
+    if (local_applied_abs_duty < desired_abs_duty) {
+        uint16_t ramp_step = (uint16_t)((PWM_MAX_DUTY + LOCAL_PWM_RAMP_UP_MS - 1u) / LOCAL_PWM_RAMP_UP_MS);
+
+        local_applied_abs_duty = (uint16_t)(local_applied_abs_duty + ramp_step);
+        if (local_applied_abs_duty > desired_abs_duty)
+            local_applied_abs_duty = desired_abs_duty;
+    } else {
+        local_applied_abs_duty = desired_abs_duty;
+    }
+
     if (motor_get_state() == MOTOR_FAULT) {
         if (local_fault_retry_ms != 0u) {
             local_fault_retry_ms--;
@@ -369,11 +383,13 @@ apply_local_command:
         if (local_fault_retry_count >= LOCAL_FAULT_RETRY_MAX)
             return;
 
+        local_applied_abs_duty = 0;
         motor_clear_fault();
         local_fault_retry_count++;
         local_fault_retry_ms = LOCAL_FAULT_RETRY_DELAY_MS;
     }
 
+    abs_duty = local_applied_abs_duty;
     dir_positive = DIR_PIN ? 1u : 0u;
 #if LOCAL_PWM_DIR_INVERT
     dir_positive = dir_positive ? 0u : 1u;

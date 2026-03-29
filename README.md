@@ -232,6 +232,7 @@ Legacy `PWM+DIR` input notes:
 - `P0.4` is treated as active-low because the board has a pull-up to 5 V. Idle/high means zero torque, which makes a floating or disconnected command input fail safe.
 - PWM edges on `P0.4` are timestamped by Timer2 capture hardware rather than by software polling.
 - Continuous active level on `P0.4` is also accepted: if the input is held low for about `20 ms`, the firmware treats that as full local command, matching the stock board's grounded-input behavior.
+- Local command is slew-limited on the way up, so a step to full local input ramps from zero to full applied duty over about `100 ms` instead of hitting the bridge in one control tick.
 - The first valid enumerate packet stops any locally driven motion and hands ownership to serial until reboot.
 - If PWM edges disappear for more than `50 ms` and the input is not being held continuously active, the local command drops to zero.
 - The default soft current limit is `3 A`, while the hard overcurrent fault remains `5 A`. That makes continuous grounded-input operation less aggressive out of the box; a serial master can still raise the torque limit explicitly.
