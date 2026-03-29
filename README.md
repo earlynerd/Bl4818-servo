@@ -10,20 +10,19 @@ dollars. They contain everything needed for a basic brushless servo drive:
 
 - Nuvoton MS51FB9AE microcontroller (8051 core, 16KB flash)
 - Three hall effect sensors for rotor position
-- Complementary three-phase MOSFET bridge with gate drivers
-- Low-side current shunt resistor for overcurrent protection
+- Complementary three-phase MOSFET bridge (no gate drivers)
+- Low-side current shunt resistor for overcurrent protection (no amplifier)
 - PWM speed input and direction control pin
 
 The stock firmware has several limitations that prevent use as a servo:
 
-1. **Poor stall behavior** — the motor loses commutation and draws excessive current
-   when stalled or heavily loaded at low speed
+1. **Poor stall behavior** — the motor quickly gives up and stops driving if stalled for any reason, making it impossible to use as a servo motor. 
 2. **Direction change requires stop** — the direction input is ignored unless the
-   motor is completely stopped, making closed-loop position control impossible
-3. **No encoder interface** — no support for external position feedback
+   motor is completely stopped, making closed-loop position control difficult.
+3. **Low Acceleration** 
 4. **No serial interface** — no way to command position/velocity/torque targets
 
-This project rewrites the firmware from scratch to fix these issues.
+This project is a minimal rewrite to fix these issues.
 
 ## Hardware
 
@@ -38,7 +37,7 @@ BL4818 brushless motor driver board (commonly sold for massage gun / fascia gun 
 | Flash              | 16 KB (APROM)             |
 | RAM                | 256B IRAM + 1KB XRAM      |
 | Package            | TSSOP-20                  |
-| Supply Voltage     | 12V DC (3S LiPo)         |
+| Supply Voltage     | 12V DC                   |
 | Logic Voltage      | 5V (onboard regulator)   |
 | Bridge             | 3-phase complementary (P+N pair per phase) |
 | Position Sensing   | 3× Hall effect sensors    |
@@ -82,8 +81,6 @@ P = ICE_DAT (pin 8), R = nRESET (pin 4), S = ICE_CLK (pin 18),
 
 ### UART
 
-UART0 TX/RX are on P0.6 (pin 2) and P0.7 (pin 3), but on this board
-those pins are used for the current shunt ADC and voltage divider ADC.
 For serial communication, use **UART1** on the programming header pads:
 UART1_TX = P1.6 (pin 8, header "P"), UART1_RX = P0.2 (pin 18, header "S").
 
@@ -92,22 +89,10 @@ UART1_TX = P1.6 (pin 8, header "P"), UART1_RX = P0.2 (pin 18, header "S").
 ### Implemented
 
 - [x] Six-step (trapezoidal) commutation from hall sensors
-- [x] Complementary PWM with configurable dead time
-- [x] Active braking and regeneration on direction change (no stop required)
-- [x] Current limiting via shunt ADC with fast overcurrent fault brake
-- [x] Smooth low-speed operation with stall detection and recovery
-- [x] Incremental encoder interface (quadrature decoding)
-- [x] PID position and velocity control loops
-- [x] UART1 binary ring protocol for duty / torque control, with separate bench-only ASCII bring-up firmware
-- [x] Configurable parameters stored in flash (IAP)
-- [x] Watchdog safety timeout
-
-### Planned
-
-- [ ] Field-oriented control (FOC) with single-shunt reconstruction
-- [ ] CAN bus interface (via SPI-to-CAN bridge)
-- [ ] Step/direction input mode (like a stepper driver)
-- [ ] Sensorless startup (back-EMF zero crossing)
+- [x] lowside PWM (the high side fets are slow, so we switch then only once per sector)
+- [x] Current limiting via shunt ADC. limit is configurable by Serial port
+- [x] UART1 binary ring protocol for duty / torque control. Many morors can be daisy chained and commanded with a dingle serial frame, or addressed individually.
+- [x] Firmware image consumes only ~25% of flash. Room for expansion.
 
 ## Building
 
@@ -115,7 +100,7 @@ UART1_TX = P1.6 (pin 8, header "P"), UART1_RX = P0.2 (pin 18, header "S").
 
 - [SDCC](https://sdcc.sourceforge.net/) 4.2+ (Small Device C Compiler)
 - GNU Make
-- [Nuvoton Nu-Link](https://www.nuvoton.com/tool-and-software/debugger-and-programmer/1-to-1-debugger-and-programmer/nu-link/) programmer (for flashing via ICP)
+- Raspberry Pi Pico or Pico 2 for programming the device with in-repo "nu-link" ISP/ICP bridge firmware and flash script. 
 
 ### Compile
 
@@ -251,63 +236,3 @@ An Arduino-Pico / PlatformIO master-side library now lives in
 - Library: `host/arduino-pico/BL4818RingMaster`
 - Example project targeting Pico 2 W (`rpipico2w`): `host/arduino-pico/rpipico2w-master-example`
 - Single-actuator AS5047 closed-loop testbench: `host/arduino-pico/rpipico2w-single-actuator-testbench`
-
-### Hall Sequence Bring-Up
-
-If the motor twitches but does not commutate cleanly, identify the hall order
-with the **bench firmware** and the bridge disabled:
-
-1. Send `R` so all three phases coast.
-2. Turn the rotor slowly by hand in the direction you want to call positive.
-3. Send `H` or `?` repeatedly and record the `raw:` value each time it changes.
-4. The repeating six-state `raw:` loop is your actual hall sequence.
-
-The firmware expects the logical forward sequence `1 -> 3 -> 2 -> 6 -> 4 -> 5`.
-If your measured raw order differs, edit `hall_decode[]` in `src/hall.c` so each
-observed raw state maps onto that logical order.
-
-Example: if the measured raw forward order is `5 -> 4 -> 6 -> 2 -> 3 -> 1`, use:
-
-```c
-static const uint8_t __code hall_decode[8] = {
-    0, 5, 6, 4, 3, 1, 2, 7
-};
-```
-
-That keeps the commutation tables unchanged and fixes the hall ordering in one
-place.
-
-### Commutation Alignment Tuning
-
-Even with the correct hall order, the phase table can still be rotated by a
-multiple of 60 electrical degrees. That shows up as weak torque, reverse kicks,
-or sectors that appear to coast.
-
-The current firmware keeps the commutation alignment as a compile-time constant:
-
-- `COMMUTATION_OFFSET` in `include/ms51_config.h`
-- valid range: `0..5`
-
-Recommended tuning flow:
-
-1. Start with a low commanded duty from the host controller.
-2. Try `COMMUTATION_OFFSET = 0`, `1`, ..., `5`, rebuilding between changes.
-3. For each setting, check whether the motor produces the same torque direction in every hall sector.
-4. If a sector still appears dead, use the bench image to confirm the gate drive and hall decoding before changing the production commutation tables.
-
-## License
-
-MIT License. See [LICENSE](LICENSE) for details.
-
-## Contributing
-
-Contributions welcome. Please open an issue to discuss changes before submitting
-a pull request. Hardware photos and board revision documentation are especially
-appreciated.
-
-## References
-
-- [Nuvoton MS51FB9AE Datasheet](https://www.nuvoton.com/products/microcontrollers/8bit-8051-mcus/industrial-8051-series/ms51fb9ae/)
-- [MS51 Technical Reference Manual](https://www.nuvoton.com/export/resource-files/TRM_MS51FB9AE_MS51XB9AE_MS51XB9BE_EN_Rev1.03.pdf)
-- [MS51BSP_SDCC (GitHub)](https://github.com/danchouzhou/MS51BSP_SDCC)
-- [SDCC Compiler](https://sdcc.sourceforge.net/)
