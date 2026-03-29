@@ -63,7 +63,7 @@
 
 /* ── System Clock ────────────────────────────────────────────────────────── */
 #define FSYS            24000000UL  /* 24 MHz HIRC selected at startup */
-#define HIRC_TRIM_OFFSET_LSB  14    /* Measured +14 LSB to pull HIRC24 close to 24 MHz */
+#define HIRC_TRIM_OFFSET_LSB  (-14) /* Negative = faster; ~0.9 Hz/LSB on 500 Hz tach */
 
 /* ── PWM Configuration ───────────────────────────────────────────────────── */
 #define PWM_FREQUENCY   20000       /* 20 kHz switching frequency */
