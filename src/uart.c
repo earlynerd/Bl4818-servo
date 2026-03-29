@@ -69,17 +69,15 @@ void uart_init(uint32_t baudrate)
 {
     /*
      * UART1 Mode 1, Timer 3 as baud rate generator.
-     * Following TRM Section 6.8.2.2 and sample code (page 269).
      *
-     * Baud = FSYS / (16 × Pre-scale × (65536 - [RH3:RL3]))
-     *   with SMOD_1=1 and Pre-scale=1 (T3PS=000).
+     * Follow the vendor sample setup for UART1:
+     *   SCON_1 = 0x50 (mode 1, REN=1)
+     *   T3CON  = 0x08 (TR3=1, prescale=1, BRCK=0)
      *
-     * For 250000 @ 24MHz: reload = 65536 - 6 = 65530 = 0xFFFA
-     * Actual = 24000000 / (16 × 6) = 250000.0 (0.00% error)
+     * We keep the same reload math:
+     *   baud ~= FSYS / (16 * (65536 - reload))
      *
-     * T3CON bit layout (C4H, page 0):
-     *   [7] SMOD_1  [6] SMOD0_1  [5] BRCK  [4] TF3
-     *   [3] TR3     [2:0] T3PS
+     * For 250000 @ 24MHz nominal: reload = 65530 = 0xFFFA.
      */
     uint16_t reload = (uint16_t)(65536UL - ((FSYS / 16UL + baudrate / 2) / baudrate));
 
@@ -96,14 +94,17 @@ void uart_init(uint32_t baudrate)
     P0M1 |=  0x04;  /* P0.2 (RX) input */
     P0M2 &= ~0x04;
 
-    /* UART1 Mode 1, REN=1, TI_1=1 (per Nuvoton sample) */
-    SCON_1 = 0x52;
+    /* Timer 3 UART1 registers live on SFR page 0. */
+    SFR_PAGE0();
 
-    /* Timer 3: SMOD_1=1 (double baud rate), T3PS=000 (prescale=1) */
-    T3CON = 0x80;
+    /* UART1 Mode 1, REN=1. */
+    SCON_1 = 0x50;
+    TI_1 = 1;
+
+    /* Timer 3: TR3=1, prescale=1, vendor-sample UART1 mode */
+    T3CON = 0x08;
     RH3 = (uint8_t)(reload >> 8);
     RL3 = (uint8_t)(reload & 0xFF);
-    T3CON |= 0x08;  /* TR3=1 (bit 3): start Timer 3 */
 
     /* Enable UART1 interrupt source; actual delivery still depends on EA. */
     EIE1 |= UART1_INT_ENABLE_MASK;

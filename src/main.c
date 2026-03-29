@@ -92,6 +92,10 @@ static void sys_init(void)
 
 static void clock_init(void)
 {
+    /* Select the 24 MHz HIRC bank before applying any trim offset. */
+    TIMED_ACCESS();
+    RCTRIM1 |= 0x10u;
+
 #if HIRC_TRIM_OFFSET_LSB != 0
     uint16_t trim = ((uint16_t)RCTRIM0 << 1) | (uint16_t)(RCTRIM1 & 0x01u);
 
@@ -112,10 +116,12 @@ static void clock_init(void)
     TIMED_ACCESS();
     RCTRIM0 = (uint8_t)(trim >> 1);
     TIMED_ACCESS();
-    RCTRIM1 = (uint8_t)((RCTRIM1 & 0xFEu) | (trim & 0x01u));
+    RCTRIM1 = (uint8_t)((RCTRIM1 & 0x10u) | (trim & 0x01u));
 #endif
 
-    SET_HIRC_24MHZ();
+    TIMED_ACCESS();
+    CKSWT = 0x00;
+    CKDIV = 0x00;
 }
 
 static void timer1_init(void)
