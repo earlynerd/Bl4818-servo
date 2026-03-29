@@ -44,6 +44,8 @@ CMD_QUERY_STATUS = 0x10
 
 MAX_DEVICES = 16
 STATUS_FRAME_SIZE = 7
+DEFAULT_TIMEOUT_MS = 100
+DEFAULT_OPEN_SETTLE_MS = 80
 
 
 def crc8(data: bytes) -> int:
@@ -75,10 +77,17 @@ class MotorStatus:
 
 
 class BL4818RingClient:
-    def __init__(self, port: str, baudrate: int = 250000, timeout_ms: int = 20):
+    def __init__(
+        self,
+        port: str,
+        baudrate: int = 250000,
+        timeout_ms: int = DEFAULT_TIMEOUT_MS,
+        open_settle_ms: int = DEFAULT_OPEN_SETTLE_MS,
+    ):
         self.port = port
         self.baudrate = baudrate
         self.timeout_ms = timeout_ms
+        self.open_settle_ms = open_settle_ms
         self.ser: Optional[serial.Serial] = None
         self.device_count: Optional[int] = None
 
@@ -89,6 +98,8 @@ class BL4818RingClient:
             timeout=0,
             write_timeout=max(self.timeout_ms / 1000.0, 0.1),
         )
+        if self.open_settle_ms > 0:
+            time.sleep(self.open_settle_ms / 1000.0)
         self.clear_input()
 
     def close(self) -> None:
@@ -103,11 +114,11 @@ class BL4818RingClient:
 
     def enumerate(self) -> int:
         packet = bytes((SYNC_ENUMERATE, 0x00))
-        response = self._transaction(packet + bytes((crc8(packet),)), 3)
-        if response[0] != SYNC_ENUMERATE:
-            raise RingError(f"bad enumerate response sync: 0x{response[0]:02X}")
-        if response[2] != crc8(response[:2]):
-            raise RingError(f"bad enumerate crc: {response.hex(' ')}")
+        response = self._transaction(
+            packet + bytes((crc8(packet),)),
+            lambda frame: self._validate_fixed_response(frame, bytes((SYNC_ENUMERATE,))),
+            3,
+        )
 
         self.device_count = response[1]
         return self.device_count
@@ -124,11 +135,11 @@ class BL4818RingClient:
             payload.extend(self._pack_i16(duty))
         payload.append(crc8(bytes(payload)))
 
-        response = self._transaction(bytes(payload), 3)
-        if response[:2] != bytes((SYNC_BROADCAST, 0x00)):
-            raise RingError(f"bad broadcast echo: {response.hex(' ')}")
-        if response[2] != crc8(response[:2]):
-            raise RingError(f"bad broadcast crc: {response.hex(' ')}")
+        response = self._transaction(
+            bytes(payload),
+            lambda frame: self._validate_fixed_response(frame, bytes((SYNC_BROADCAST, 0x00))),
+            3,
+        )
 
     def set_duty(self, address: int, duty: int) -> MotorStatus:
         return self._send_addressed(address, CMD_SET_DUTY, self._pack_i16(duty))
@@ -151,7 +162,7 @@ class BL4818RingClient:
         self._validate_address(address)
         frame = bytes((SYNC_ADDRESS_BASE | address, cmd)) + payload
         packet = frame + bytes((crc8(frame),))
-        response = self._transaction(packet, STATUS_FRAME_SIZE)
+        response = self._transaction(packet, self._validate_status_frame, STATUS_FRAME_SIZE)
         return self._parse_status(response)
 
     def _validate_address(self, address: int) -> None:
@@ -160,7 +171,7 @@ class BL4818RingClient:
         if self.device_count is not None and address >= self.device_count:
             raise RingError(f"address {address} is outside enumerated range 0..{self.device_count - 1}")
 
-    def _transaction(self, packet: bytes, response_len: int) -> bytes:
+    def _transaction(self, packet: bytes, validator, response_len: int) -> bytes:
         if not self.ser:
             raise RingError("serial port is not open")
 
@@ -170,30 +181,34 @@ class BL4818RingClient:
         if written != len(packet):
             raise RingError(f"short write: wrote {written} of {len(packet)} bytes")
 
-        return self._read_exact(response_len)
+        return self._read_valid_frame(response_len, validator)
 
-    def _read_exact(self, length: int) -> bytes:
+    def _read_valid_frame(self, length: int, validator) -> bytes:
         assert self.ser is not None
 
         received = bytearray()
         last_byte_at = time.monotonic()
         timeout_s = self.timeout_ms / 1000.0
 
-        while len(received) < length:
-            chunk = self.ser.read(length - len(received))
+        while True:
+            chunk = self.ser.read(max(length, 1))
             if chunk:
                 received.extend(chunk)
                 last_byte_at = time.monotonic()
+
+                while len(received) >= length:
+                    candidate = bytes(received[:length])
+                    if validator(candidate):
+                        return candidate
+                    del received[0]
                 continue
 
             if time.monotonic() - last_byte_at >= timeout_s:
                 raise RingTimeout(
-                    f"timeout waiting for {length} bytes (received {len(received)})"
+                    f"timeout waiting for valid {length}-byte frame (buffer={received.hex(' ')})"
                 )
 
             time.sleep(0.001)
-
-        return bytes(received)
 
     @staticmethod
     def _pack_i16(value: int) -> bytes:
@@ -205,10 +220,8 @@ class BL4818RingClient:
     def _parse_status(frame: bytes) -> MotorStatus:
         if len(frame) != STATUS_FRAME_SIZE:
             raise RingError(f"expected {STATUS_FRAME_SIZE} status bytes, got {len(frame)}")
-        if frame[0] != SYNC_STATUS:
-            raise RingError(f"bad status sync: 0x{frame[0]:02X}")
-        if frame[6] != crc8(frame[:6]):
-            raise RingError(f"bad status crc: {frame.hex(' ')}")
+        if not BL4818RingClient._validate_status_frame(frame):
+            raise RingError(f"bad status frame: {frame.hex(' ')}")
 
         return MotorStatus(
             state=frame[1],
@@ -216,6 +229,22 @@ class BL4818RingClient:
             current_ma=struct.unpack(">H", frame[3:5])[0],
             hall=frame[5],
         )
+
+    @staticmethod
+    def _validate_fixed_response(frame: bytes, prefix: bytes) -> bool:
+        if len(frame) != len(prefix) + 1:
+            return False
+        if frame[: len(prefix)] != prefix:
+            return False
+        return frame[-1] == crc8(frame[:-1])
+
+    @staticmethod
+    def _validate_status_frame(frame: bytes) -> bool:
+        if len(frame) != STATUS_FRAME_SIZE:
+            return False
+        if frame[0] != SYNC_STATUS:
+            return False
+        return frame[6] == crc8(frame[:6])
 
 
 def auto_detect_port() -> Optional[str]:
@@ -327,12 +356,17 @@ def parse_baud_list(spec: str) -> list[int]:
     return baud_list
 
 
-def run_probe(port: str, timeout_ms: int, baud_list: list[int]) -> int:
+def run_probe(port: str, timeout_ms: int, baud_list: list[int], open_settle_ms: int) -> int:
     print(f"probing port={port} bauds={','.join(str(v) for v in baud_list)}")
     any_success = False
 
     for baud in baud_list:
-        client = BL4818RingClient(port=port, baudrate=baud, timeout_ms=timeout_ms)
+        client = BL4818RingClient(
+            port=port,
+            baudrate=baud,
+            timeout_ms=timeout_ms,
+            open_settle_ms=open_settle_ms,
+        )
         try:
             client.open()
             count = client.enumerate()
@@ -357,8 +391,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--timeout-ms",
         type=int,
-        default=20,
-        help="Per-transaction inactivity timeout in milliseconds (default: 20)",
+        default=DEFAULT_TIMEOUT_MS,
+        help=f"Per-transaction inactivity timeout in milliseconds (default: {DEFAULT_TIMEOUT_MS})",
+    )
+    parser.add_argument(
+        "--open-settle-ms",
+        type=int,
+        default=DEFAULT_OPEN_SETTLE_MS,
+        help=f"Delay after opening the port before first I/O (default: {DEFAULT_OPEN_SETTLE_MS})",
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -445,12 +485,17 @@ def main() -> int:
 
     if args.command == "probe":
         try:
-            return run_probe(port, args.timeout_ms, parse_baud_list(args.bauds))
+            return run_probe(port, args.timeout_ms, parse_baud_list(args.bauds), args.open_settle_ms)
         except RingError as exc:
             print(f"ERROR: {exc}")
             return 1
 
-    client = BL4818RingClient(port=port, baudrate=args.baud, timeout_ms=args.timeout_ms)
+    client = BL4818RingClient(
+        port=port,
+        baudrate=args.baud,
+        timeout_ms=args.timeout_ms,
+        open_settle_ms=args.open_settle_ms,
+    )
 
     try:
         client.open()
