@@ -47,9 +47,11 @@ BIN      = $(BUILDDIR)/$(TARGET).bin
 ifeq ($(OS),Windows_NT)
 MKDIR_BUILD = powershell -NoProfile -Command "if (-not (Test-Path '$(BUILDDIR)')) { New-Item -ItemType Directory '$(BUILDDIR)' | Out-Null }"
 RMDIR_BUILD = powershell -NoProfile -Command "if (Test-Path '$(BUILDDIR)') { Remove-Item -Recurse -Force '$(BUILDDIR)' }"
+BIN_BUILD = powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ihx-to-bin.ps1 -InputPath "$<" -OutputPath "$@"
 else
 MKDIR_BUILD = mkdir -p $(BUILDDIR)
 RMDIR_BUILD = rm -rf $(BUILDDIR)
+BIN_BUILD = $(OBJCOPY) -I ihex -O binary $< $@
 endif
 
 # ── Compiler Flags ───────────────────────────────────────────────────────────
@@ -101,7 +103,7 @@ $(HEX): $(IHX)
 	$(PACKIHX) $< > $@
 
 $(BIN): $(IHX)
-	$(OBJCOPY) -I ihex -O binary $< $@
+	$(BIN_BUILD)
 
 clean:
 	$(RMDIR_BUILD)

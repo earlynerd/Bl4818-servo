@@ -25,8 +25,10 @@ BIN  = $(BUILDDIR)/$(TARGET).bin
 
 ifeq ($(OS),Windows_NT)
 MKDIR_BUILD = powershell -NoProfile -Command "if (-not (Test-Path '$(BUILDDIR)')) { New-Item -ItemType Directory '$(BUILDDIR)' | Out-Null }"
+BIN_BUILD = powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ihx-to-bin.ps1 -InputPath "$<" -OutputPath "$@"
 else
 MKDIR_BUILD = mkdir -p $(BUILDDIR)
+BIN_BUILD = $(OBJCOPY) -I ihex -O binary $< $@
 endif
 
 CFLAGS  = -m$(MCU)
@@ -68,7 +70,7 @@ $(IHX): $(RELS) | $(BUILDDIR)
 	$(CC) $(LDFLAGS) $(RELS)
 
 $(BIN): $(IHX)
-	$(OBJCOPY) -I ihex -O binary $< $@
+	$(BIN_BUILD)
 
 clean:
 ifeq ($(OS),Windows_NT)

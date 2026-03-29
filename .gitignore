@@ -4,6 +4,7 @@ build/
 *.lst
 *.sym
 *.asm
+!src/vectors.asm
 *.rst
 *.mem
 *.map
