@@ -96,39 +96,17 @@ static void clock_init(void)
     TIMED_ACCESS();
     RCTRIM1 |= 0x10u;
 
-#if HIRC_TRIM_OFFSET_LSB != 0
+#if HIRC_TRIM_OFFSET != 0
     /*
-     * Read factory trim (9-bit): RCTRIM0 = bits[8:1], RCTRIM1 bit 0 = bit[0].
-     * Apply offset and write back.
+     * Adjust RCTRIM0 directly — avoids 9-bit encode/decode assumptions.
      *
      * CRITICAL: TIMED_ACCESS only holds the TA window open for 3 instructions.
-     * Pre-compute the new register values BEFORE the TA unlock so the
-     * mov-to-SFR is the very first instruction after TA = 0x55.
+     * Pre-compute the value BEFORE the TA unlock.
      */
-    uint16_t trim = ((uint16_t)RCTRIM0 << 1) | (uint16_t)(RCTRIM1 & 0x01u);
-
-#if HIRC_TRIM_OFFSET_LSB > 0
-    if (trim > (uint16_t)(0x01FFu - (uint16_t)HIRC_TRIM_OFFSET_LSB)) {
-        trim = 0x01FFu;
-    } else {
-        trim += (uint16_t)HIRC_TRIM_OFFSET_LSB;
-    }
-#else
-    if (trim < (uint16_t)(-(HIRC_TRIM_OFFSET_LSB))) {
-        trim = 0u;
-    } else {
-        trim -= (uint16_t)(-(HIRC_TRIM_OFFSET_LSB));
-    }
-#endif
-
     {
-        uint8_t new_r0 = (uint8_t)(trim >> 1);
-        uint8_t new_r1 = (uint8_t)((RCTRIM1 & 0x10u) | (trim & 0x01u));
-
+        uint8_t r0 = (uint8_t)(RCTRIM0 + (int8_t)HIRC_TRIM_OFFSET);
         TIMED_ACCESS();
-        RCTRIM0 = new_r0;
-        TIMED_ACCESS();
-        RCTRIM1 = new_r1;
+        RCTRIM0 = r0;
     }
 #endif
 
