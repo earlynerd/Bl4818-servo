@@ -101,8 +101,8 @@ void uart_init(uint32_t baudrate)
     SCON_1 = 0x50;
     TI_1 = 1;
 
-    /* Timer 3: TR3=1, prescale=1, vendor-sample UART1 mode */
-    T3CON = 0x08;
+    /* Timer 3: SMOD_1=1 (double baud), TR3=1, prescale=1 */
+    T3CON = 0x88;
     RH3 = (uint8_t)(reload >> 8);
     RL3 = (uint8_t)(reload & 0xFF);
 
