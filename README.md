@@ -187,9 +187,7 @@ python flash.py --recover --power-off-ms 100 \
 │   ├── adc.h              ADC (current sense, voltage)
 │   ├── commutation.h      Six-step commutation tables and logic
 │   ├── hall.h             Hall sensor reading and state machine
-│   ├── encoder.h          Quadrature encoder interface
-│   ├── motor.h            Motor control state machine
-│   ├── pid.h              PID controller
+│   ├── motor.h            Motor control 
 │   ├── uart.h             UART1 driver with RX/TX ring buffers
 │   ├── protocol.h         Production binary ring protocol
 │   └── flash.h            IAP flash parameter storage
@@ -199,7 +197,6 @@ python flash.py --recover --power-off-ms 100 \
 │   ├── adc.c              ADC sampling and current measurement
 │   ├── commutation.c      Commutation table and phase switching
 │   ├── hall.c             Hall sensor ISR and state tracking
-│   ├── encoder.c          Encoder counting ISR
 │   ├── motor.c            Motor state machine (run/brake/fault)
 │   ├── pid.c              PID loop implementation
 │   ├── uart.c             Interrupt-buffered UART1 RX/TX
