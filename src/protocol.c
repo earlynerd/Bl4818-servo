@@ -1,16 +1,23 @@
 /*
- * Serial Command Protocol — ASCII text commands over UART
+ * Binary Ring Protocol
  *
- * Commands are single-character prefixed, terminated by newline.
+ * The production firmware accepts only the binary ring protocol:
  *
- *   D<val>  Set duty cycle (-PWM_MAX to +PWM_MAX) and run
- *   T<val>  Set current limit in mA (1 to CURRENT_LIMIT_MA)
- *   S       Stop (coast, all outputs off)
- *   R       Release (same as stop)
- *   C       Clear fault
- *   ?       Status query
- *   H       Hall sensor debug
- *   K       Drive state debug (PMEN/PMD)
+ *   0x7F [counter]
+ *       Enumerate. Each device claims the current counter as its address,
+ *       increments it, and forwards the packet.
+ *
+ *   0xFF [slots] [d0_hi] [d0_lo] ...
+ *       Broadcast duty update. Each device decrements slots, consumes the
+ *       first duty pair for itself, and forwards the remaining pairs.
+ *
+ *   [0x80 | addr] [cmd] [payload...]
+ *       Addressed command. The addressed device swallows the command,
+ *       executes it, and emits a fixed status response:
+ *
+ *   0x7E [state] [fault] [cur_hi] [cur_lo] [hall]
+ *
+ * The bench firmware retains the separate ASCII debug protocol.
  */
 
 #include "ms51_reg.h"
@@ -19,177 +26,238 @@
 #include "uart.h"
 #include "motor.h"
 #include "hall.h"
-#include "commutation.h"
-#include "pwm.h"
 
-static char __xdata cmd_buf[PROTO_BUF_SIZE];
-static uint8_t cmd_len;
+#define PROTO_SYNC_STATUS         0x7Eu
+#define PROTO_SYNC_ENUM           0x7Fu
+#define PROTO_SYNC_ADDR_BASE      0x80u
+#define PROTO_SYNC_ADDR_MASK      0xF0u
+#define PROTO_SYNC_BROADCAST      0xFFu
 
-static const char *parse_int16(const char *s, int16_t *val)
+#define PROTO_ADDR_UNASSIGNED     0xFFu
+#define PROTO_MAX_ADDRESSED_DEV   16u
+
+#define PROTO_CMD_SET_DUTY        0x01u
+#define PROTO_CMD_SET_TORQUE      0x02u
+#define PROTO_CMD_STOP            0x03u
+#define PROTO_CMD_CLEAR_FAULT     0x04u
+#define PROTO_CMD_QUERY_STATUS    0x10u
+
+#define PROTO_STATUS_PAYLOAD_SIZE 5u
+
+typedef enum {
+    PROTO_RX_IDLE = 0,
+    PROTO_RX_ENUM_COUNTER,
+    PROTO_RX_ADDR_CMD,
+    PROTO_RX_ADDR_PAYLOAD,
+    PROTO_RX_STATUS_FORWARD,
+    PROTO_RX_BROADCAST_COUNT,
+    PROTO_RX_BROADCAST_DUTY_HI,
+    PROTO_RX_BROADCAST_DUTY_LO,
+    PROTO_RX_BROADCAST_FORWARD
+} proto_rx_state_t;
+
+static uint8_t device_addr;
+static proto_rx_state_t rx_state;
+static uint8_t rx_addr;
+static uint8_t rx_cmd;
+static uint8_t rx_payload[2];
+static uint8_t rx_payload_len;
+static uint8_t rx_payload_pos;
+static uint8_t rx_targeted;
+static uint16_t rx_forward_remaining;
+
+static void send_status_binary(void)
 {
-    int16_t result = 0;
-    uint8_t neg = 0;
+    uint16_t current = motor_get_current();
 
-    if (*s == '-') {
-        neg = 1;
-        s++;
-    } else if (*s == '+') {
-        s++;
-    }
-
-    while (*s >= '0' && *s <= '9') {
-        result = result * 10 + (*s - '0');
-        s++;
-    }
-
-    *val = neg ? -result : result;
-    return s;
+    uart_putc(PROTO_SYNC_STATUS);
+    uart_putc((uint8_t)motor_get_state());
+    uart_putc((uint8_t)motor_get_fault());
+    uart_putc((uint8_t)(current >> 8));
+    uart_putc((uint8_t)(current & 0xFFu));
+    uart_putc(hall_read());
 }
 
-static void send_ok(void)  { uart_puts("OK\n"); }
-static void send_err(void) { uart_puts("ERR\n"); }
-
-static void send_status(void)
+static uint8_t command_payload_len(uint8_t cmd)
 {
-    uart_puts("state:");
-    uart_put_int(motor_get_state());
-    uart_puts(",fault:");
-    uart_put_int(motor_get_fault());
-    uart_puts(",cur:");
-    uart_put_int(motor_get_current());
-    uart_puts(",duty:");
-    uart_put_int(pwm_get_duty());
-    uart_puts(",hall:");
-    uart_put_int(hall_read());
-    uart_putc('\n');
+    if (cmd == PROTO_CMD_SET_DUTY || cmd == PROTO_CMD_SET_TORQUE)
+        return 2;
+
+    return 0;
 }
 
-static void send_hall_status(void)
+static void execute_set_duty(int16_t duty)
 {
-    uint8_t raw = hall_read_raw();
-    uint8_t hall = hall_decode_state(raw);
-
-    uart_puts("raw:");
-    uart_put_int(raw);
-    uart_puts(",hall:");
-    uart_put_int(hall);
-    uart_puts(",h321:");
-    uart_putc((raw & 0x04) ? '1' : '0');
-    uart_putc((raw & 0x02) ? '1' : '0');
-    uart_putc((raw & 0x01) ? '1' : '0');
-    uart_puts(",dir:");
-    uart_put_int(hall_direction());
-    uart_puts(",count:");
-    uart_put_int(hall_count());
-    uart_puts(",period:");
-    uart_put_int(hall_period());
-    uart_putc('\n');
-}
-
-static void send_drive_status(void)
-{
-    uart_puts("raw:");
-    uart_put_int(hall_read_raw());
-    uart_puts(",hall:");
-    uart_put_int(hall_read());
-    uart_puts(",state:");
-    uart_put_int(motor_get_state());
-    uart_puts(",fault:");
-    uart_put_int(motor_get_fault());
-    uart_puts(",duty:");
-    uart_put_int(pwm_get_duty());
-    uart_puts(",run:");
-    uart_put_int(PWMRUN ? 1 : 0);
-    uart_puts(",pmen:");
-    uart_put_int(PMEN);
-    uart_puts(",pmd:");
-    uart_put_int(PMD);
-    uart_putc('\n');
-}
-
-static void process_command(void)
-{
-    int16_t val;
-
-    if (cmd_len == 0)
+    if (duty < -(int16_t)PWM_MAX_DUTY || duty > (int16_t)PWM_MAX_DUTY)
         return;
 
-    switch (cmd_buf[0]) {
-    case 'd':
-    case 'D':
-        parse_int16(&cmd_buf[1], &val);
-        if (val >= -(int16_t)PWM_MAX_DUTY && val <= (int16_t)PWM_MAX_DUTY) {
-            motor_set_duty(val);
-            motor_start();
-            send_ok();
-        } else {
-            send_err();
-        }
-        break;
+    motor_set_duty(duty);
+    motor_start();
+}
 
-    case 't':
-    case 'T':
-        parse_int16(&cmd_buf[1], &val);
-        if (val > 0 && val <= (int16_t)CURRENT_LIMIT_MA) {
-            motor_set_torque_limit((uint16_t)val);
-            send_ok();
-        } else {
-            send_err();
-        }
-        break;
+static void execute_set_torque(uint16_t ma)
+{
+    if (ma == 0u || ma > CURRENT_LIMIT_MA)
+        return;
 
-    case 's':
-    case 'S':
-    case 'r':
-    case 'R':
+    motor_set_torque_limit(ma);
+}
+
+static void execute_addressed_command(void)
+{
+    uint16_t value_u16;
+    int16_t value_i16;
+
+    if (rx_cmd == PROTO_CMD_SET_DUTY) {
+        value_u16 = (uint16_t)(((uint16_t)rx_payload[0] << 8) | rx_payload[1]);
+        value_i16 = (int16_t)value_u16;
+        execute_set_duty(value_i16);
+    } else if (rx_cmd == PROTO_CMD_SET_TORQUE) {
+        value_u16 = (uint16_t)(((uint16_t)rx_payload[0] << 8) | rx_payload[1]);
+        execute_set_torque(value_u16);
+    } else if (rx_cmd == PROTO_CMD_STOP) {
         motor_stop();
-        send_ok();
-        break;
-
-    case 'c':
-    case 'C':
+    } else if (rx_cmd == PROTO_CMD_CLEAR_FAULT) {
         motor_clear_fault();
-        send_ok();
-        break;
-
-    case '?':
-        send_status();
-        break;
-
-    case 'h':
-    case 'H':
-        send_hall_status();
-        break;
-
-    case 'k':
-    case 'K':
-        send_drive_status();
-        break;
-
-    default:
-        send_err();
-        break;
     }
+
+    send_status_binary();
+}
+
+static void protocol_reset(void)
+{
+    rx_state = PROTO_RX_IDLE;
+    rx_payload_len = 0;
+    rx_payload_pos = 0;
+    rx_targeted = 0;
+    rx_forward_remaining = 0;
 }
 
 void protocol_init(void)
 {
-    cmd_len = 0;
+    device_addr = PROTO_ADDR_UNASSIGNED;
+    uart_rx_flush();
+    protocol_reset();
 }
 
 void protocol_poll(void)
 {
     while (uart_available()) {
-        int16_t c = uart_getc();
-        if (c < 0)
+        uint8_t c = (uint8_t)uart_getc();
+
+        switch (rx_state) {
+        case PROTO_RX_IDLE:
+            if (c == PROTO_SYNC_ENUM) {
+                uart_putc(PROTO_SYNC_ENUM);
+                rx_state = PROTO_RX_ENUM_COUNTER;
+                break;
+            }
+
+            if (c == PROTO_SYNC_STATUS) {
+                uart_putc(c);
+                rx_forward_remaining = PROTO_STATUS_PAYLOAD_SIZE;
+                rx_state = PROTO_RX_STATUS_FORWARD;
+                break;
+            }
+
+            if (c == PROTO_SYNC_BROADCAST) {
+                rx_state = PROTO_RX_BROADCAST_COUNT;
+                break;
+            }
+
+            if ((c & PROTO_SYNC_ADDR_MASK) == PROTO_SYNC_ADDR_BASE) {
+                rx_addr = c & 0x0Fu;
+                rx_targeted = (device_addr != PROTO_ADDR_UNASSIGNED && rx_addr == device_addr) ? 1u : 0u;
+
+                if (!rx_targeted)
+                    uart_putc(c);
+
+                rx_state = PROTO_RX_ADDR_CMD;
+            }
             break;
 
-        if (c == '\n' || c == '\r') {
-            cmd_buf[cmd_len] = '\0';
-            process_command();
-            cmd_len = 0;
-        } else if (cmd_len < PROTO_BUF_SIZE - 1) {
-            cmd_buf[cmd_len++] = (char)c;
+        case PROTO_RX_ENUM_COUNTER:
+            device_addr = (c < PROTO_MAX_ADDRESSED_DEV) ? c : PROTO_ADDR_UNASSIGNED;
+            uart_putc((uint8_t)(c + 1u));
+            protocol_reset();
+            break;
+
+        case PROTO_RX_STATUS_FORWARD:
+            uart_putc(c);
+            if (--rx_forward_remaining == 0u)
+                protocol_reset();
+            break;
+
+        case PROTO_RX_ADDR_CMD:
+            rx_cmd = c;
+            rx_payload_len = command_payload_len(rx_cmd);
+            rx_payload_pos = 0;
+
+            if (!rx_targeted)
+                uart_putc(c);
+
+            if (rx_payload_len == 0u) {
+                if (rx_targeted)
+                    execute_addressed_command();
+                protocol_reset();
+            } else {
+                rx_state = PROTO_RX_ADDR_PAYLOAD;
+            }
+            break;
+
+        case PROTO_RX_ADDR_PAYLOAD:
+            if (rx_payload_pos < sizeof(rx_payload))
+                rx_payload[rx_payload_pos] = c;
+
+            rx_payload_pos++;
+
+            if (!rx_targeted)
+                uart_putc(c);
+
+            if (rx_payload_pos >= rx_payload_len) {
+                if (rx_targeted)
+                    execute_addressed_command();
+                protocol_reset();
+            }
+            break;
+
+        case PROTO_RX_BROADCAST_COUNT:
+            uart_putc(PROTO_SYNC_BROADCAST);
+            uart_putc((uint8_t)(c ? (c - 1u) : 0u));
+
+            if (c == 0u) {
+                protocol_reset();
+            } else {
+                rx_forward_remaining = (uint16_t)(2u * (uint16_t)(c - 1u));
+                rx_state = PROTO_RX_BROADCAST_DUTY_HI;
+            }
+            break;
+
+        case PROTO_RX_BROADCAST_DUTY_HI:
+            rx_payload[0] = c;
+            rx_state = PROTO_RX_BROADCAST_DUTY_LO;
+            break;
+
+        case PROTO_RX_BROADCAST_DUTY_LO:
+            rx_payload[1] = c;
+            execute_set_duty((int16_t)(((uint16_t)rx_payload[0] << 8) | rx_payload[1]));
+
+            if (rx_forward_remaining == 0u) {
+                protocol_reset();
+            } else {
+                rx_state = PROTO_RX_BROADCAST_FORWARD;
+            }
+            break;
+
+        case PROTO_RX_BROADCAST_FORWARD:
+            uart_putc(c);
+            if (--rx_forward_remaining == 0u)
+                protocol_reset();
+            break;
+
+        default:
+            protocol_reset();
+            break;
         }
     }
 }

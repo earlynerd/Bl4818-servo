@@ -17,3 +17,4 @@ build/
 .vscode/
 .idea/
 __pycache__
+.pio/

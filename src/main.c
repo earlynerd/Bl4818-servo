@@ -9,7 +9,7 @@
  *   Timer 1 — 1 kHz tick for control loop timing
  *   Timer 2 — Free-running counter for speed measurement
  *   Timer 3 — UART baud rate generator
- *   UART1   — Serial command interface (115200 baud, on prog header)
+ *   UART1   — Binary ring serial interface (115200 baud, on prog header)
  *   ADC     — Current sensing (polled in control loop)
  *   GPIO    — Hall sensors (polled)
  */
@@ -51,10 +51,6 @@ void main(void)
     wdt_init();
 
     EA = 1;
-
-#if FEATURE_UART
-    uart_puts("BL4818-Servo v0.2\n");
-#endif
 
     while (1) {
         motor_poll_fast();

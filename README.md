@@ -98,7 +98,7 @@ UART1_TX = P1.6 (pin 8, header "P"), UART1_RX = P0.2 (pin 18, header "S").
 - [x] Smooth low-speed operation with stall detection and recovery
 - [x] Incremental encoder interface (quadrature decoding)
 - [x] PID position and velocity control loops
-- [x] UART command protocol for target position/velocity/torque
+- [x] UART1 binary ring protocol for duty / torque control, with separate bench-only ASCII bring-up firmware
 - [x] Configurable parameters stored in flash (IAP)
 - [x] Watchdog safety timeout
 
@@ -205,8 +205,8 @@ python flash.py --recover --power-off-ms 100 \
 │   ├── encoder.h          Quadrature encoder interface
 │   ├── motor.h            Motor control state machine
 │   ├── pid.h              PID controller
-│   ├── uart.h             UART driver
-│   ├── protocol.h         Serial command protocol
+│   ├── uart.h             UART1 driver with RX/TX ring buffers
+│   ├── protocol.h         Production binary ring protocol
 │   └── flash.h            IAP flash parameter storage
 ├── src/
 │   ├── main.c             Entry point, init, main loop
@@ -217,8 +217,8 @@ python flash.py --recover --power-off-ms 100 \
 │   ├── encoder.c          Encoder counting ISR
 │   ├── motor.c            Motor state machine (run/brake/fault)
 │   ├── pid.c              PID loop implementation
-│   ├── uart.c             UART TX/RX with ring buffer
-│   ├── protocol.c         Command parser and response
+│   ├── uart.c             Interrupt-buffered UART1 RX/TX
+│   ├── protocol.c         Binary ring protocol engine
 │   └── flash.c            IAP read/write for parameters
 └── docs/
     └── pinout.md          Detailed pinout and board photos
@@ -226,38 +226,34 @@ python flash.py --recover --power-off-ms 100 \
 
 ## Serial Protocol
 
-Default: 115200 baud, 8N1
+Default: 115200 baud, 8N1 on UART1.
 
-Commands are ASCII text terminated by newline (`\n`):
+The production firmware now uses a binary ring protocol only:
 
-| Command          | Description                          | Response         |
-|------------------|--------------------------------------|------------------|
-| `P<counts>`      | Set target position (encoder counts) | `OK` or `ERR`    |
-| `V<rpm>`         | Set target velocity (RPM)            | `OK` or `ERR`    |
-| `T<mA>`          | Set torque limit (milliamps)         | `OK` or `ERR`    |
-| `D<duty>`        | Direct PWM duty (0–1000, open-loop)  | `OK` or `ERR`    |
-| `S`              | Stop (brake)                         | `OK`             |
-| `R`              | Release (coast)                      | `OK`             |
-| `?`              | Query status                         | See below        |
-| `H`              | Query hall sensors                   | See below        |
-| `K`              | Query low-level drive state          | See below        |
-| `G<param>`       | Get parameter                        | `<value>`        |
-| `W<param>=<val>` | Set parameter (saved to flash)       | `OK` or `ERR`    |
+- Enumeration
+- Broadcast duty updates
+- Addressed commands with fixed-length status responses
 
-Status response format: `pos:<counts>,vel:<rpm>,cur:<mA>,state:<state>,fault:<code>,hall:<state>,offset:<n>`
+The separate bench firmware keeps the ASCII bring-up commands.
 
-Hall response format: `raw:<state>,hall:<logical>,h321:<bits>,dir:<dir>,count:<count>,period:<ticks>`
+See [protocol.md](protocol.md) for the wire format, transaction model, and examples.
 
-Drive response format: `raw:<state>,hall:<state>,offset:<n>,state:<state>,fault:<code>,duty:<duty>,run:<0|1>,pmen:<mask>,pmd:<mask>`
+## RP2350 Master Library
+
+An Arduino-Pico / PlatformIO master-side library now lives in
+`host/arduino-pico/BL4818RingMaster`.
+
+- Library: `host/arduino-pico/BL4818RingMaster`
+- Example project targeting Pico 2 W (`rpipico2w`): `host/arduino-pico/rpipico2w-master-example`
 
 ### Hall Sequence Bring-Up
 
 If the motor twitches but does not commutate cleanly, identify the hall order
-with the bridge disabled:
+with the **bench firmware** and the bridge disabled:
 
 1. Send `R` so all three phases coast.
 2. Turn the rotor slowly by hand in the direction you want to call positive.
-3. Send `H` repeatedly and record the `raw:` value each time it changes.
+3. Send `H` or `?` repeatedly and record the `raw:` value each time it changes.
 4. The repeating six-state `raw:` loop is your actual hall sequence.
 
 The firmware expects the logical forward sequence `1 -> 3 -> 2 -> 6 -> 4 -> 5`.
@@ -281,17 +277,17 @@ Even with the correct hall order, the phase table can still be rotated by a
 multiple of 60 electrical degrees. That shows up as weak torque, reverse kicks,
 or sectors that appear to coast.
 
-Parameter `9` is the commutation offset:
+The current firmware keeps the commutation alignment as a compile-time constant:
 
-- `G9` reads the current offset.
-- `W9=<0..5>` rotates the hall-to-phase alignment and saves it to flash.
+- `COMMUTATION_OFFSET` in `include/ms51_config.h`
+- valid range: `0..5`
 
 Recommended tuning flow:
 
-1. Start with a low open-loop command such as `D50`.
-2. Try `W9=0`, `W9=1`, ..., `W9=5`.
+1. Start with a low commanded duty from the host controller.
+2. Try `COMMUTATION_OFFSET = 0`, `1`, ..., `5`, rebuilding between changes.
 3. For each setting, check whether the motor produces the same torque direction in every hall sector.
-4. If a sector still appears dead, send `K` and check whether `run:1` and the `pmen`/`pmd` masks are nonzero. If they are, the firmware is commanding a phase state and the remaining problem is in gate polarity or phase wiring, not hall decoding.
+4. If a sector still appears dead, use the bench image to confirm the gate drive and hall decoding before changing the production commutation tables.
 
 ## License
 

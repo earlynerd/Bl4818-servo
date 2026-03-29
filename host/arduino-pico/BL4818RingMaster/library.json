@@ -1,0 +1,21 @@
+{
+  "name": "BL4818RingMaster",
+  "version": "0.1.0",
+  "description": "Arduino-Pico / PlatformIO master-side UART ring protocol library for BL4818 brushless servo nodes",
+  "keywords": [
+    "bl4818",
+    "uart",
+    "ring",
+    "servo",
+    "rp2350",
+    "arduino-pico"
+  ],
+  "license": "MIT",
+  "frameworks": [
+    "arduino"
+  ],
+  "platforms": [
+    "raspberrypi"
+  ],
+  "headers": "BL4818RingMaster.h"
+}
