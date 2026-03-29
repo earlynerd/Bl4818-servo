@@ -1,3 +1,4 @@
+![Image of BL4818 brushless outrunner motor](resources/motor.png)
 # BL4818-Servo: Custom Firmware for BL4818 Brushless Motor Drivers
 
 Custom open-source firmware for the inexpensive BL4818 "massage gun" / "fascia gun"
@@ -72,8 +73,12 @@ Pin  Port   Key Functions                      Board Connection
 20   P0.4   ADC_CH5 / PWM0_CH3 / STADC         PWM speed input (unpop RC)
 ```
 
+![Image of BL4818 in-circuit programming header](resources/motor_pins.jpg)
+
 **Programming header** (silkscreen: P, R, S, +, −):
 P = ICE_DAT (pin 8), R = nRESET (pin 4), S = ICE_CLK (pin 18),
+
+
 \+ = VDD (pin 9), − = GND (pin 7)
 
 > All pin assignments confirmed by multimeter probing.
