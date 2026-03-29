@@ -226,6 +226,13 @@ For direct host-side validation of the binary protocol, use `ring_tool.py`.
 It can enumerate, send broadcast duty packets, issue addressed commands, and
 run a repeated broadcast-plus-status validation loop over a PC serial port.
 
+Safety warning:
+
+- This firmware accepts direct duty / torque commands and does not yet enforce a proven safe operating area for sustained stall, locked-rotor, or repeated high-load low-speed operation.
+- Present protections are limited to a soft current pullback, a hard overcurrent fault, local-input ramping, and bounded local retries. Those help, but they are not a guarantee that the board, motor, or wiring cannot be overheated or damaged.
+- A commanded full-duty stall can still be destructive, especially if an external master raises the torque limit or repeatedly re-applies command after fault recovery.
+- Until a better thermal / `I^2t` style derate exists, test with a current-limited supply and conservative torque / duty settings.
+
 Legacy `PWM+DIR` input notes:
 
 - Before enumeration, `P0.4` PWM plus `P1.4` direction can still drive the motor.
