@@ -60,6 +60,10 @@ void main(void)
 
     EA = 1;
 
+#if FEATURE_UART
+    uart_putc('!');
+#endif
+
     while (1) {
         motor_poll_fast();
 

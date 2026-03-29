@@ -63,7 +63,7 @@
 
 /* ── System Clock ────────────────────────────────────────────────────────── */
 #define FSYS            24000000UL  /* 24 MHz HIRC selected at startup */
-#define HIRC_TRIM_OFFSET     8     /* Additive offset to RCTRIM0 (sign TBD empirically) */
+#define HIRC_TRIM_OFFSET     (-2)  /* Empirically tuned: -2 → 499.7 Hz tach (24 MHz ±0.06%) */
 
 /* ── PWM Configuration ───────────────────────────────────────────────────── */
 #define PWM_FREQUENCY   20000       /* 20 kHz switching frequency */

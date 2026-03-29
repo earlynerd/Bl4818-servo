@@ -28,12 +28,15 @@ BUILDDIR = build
 # ── Sources ──────────────────────────────────────────────────────────────────
 EXCLUDE = $(SRCDIR)/pid.c $(SRCDIR)/encoder.c $(SRCDIR)/flash.c
 SRCS = $(filter-out $(EXCLUDE),$(wildcard $(SRCDIR)/*.c))
-RELS = $(patsubst $(SRCDIR)/%.c,$(BUILDDIR)/%.rel,$(SRCS))
+ASM_SRCS = $(SRCDIR)/vectors.asm
+C_RELS = $(patsubst $(SRCDIR)/%.c,$(BUILDDIR)/%.rel,$(SRCS))
+ASM_RELS = $(patsubst $(SRCDIR)/%.asm,$(BUILDDIR)/%.rel,$(ASM_SRCS))
+RELS = $(C_RELS) $(ASM_RELS)
 
 # main.c must be linked first for correct startup
 MAIN_REL = $(BUILDDIR)/main.rel
-OTHER_RELS = $(filter-out $(MAIN_REL),$(RELS))
-ORDERED_RELS = $(MAIN_REL) $(OTHER_RELS)
+OTHER_C_RELS = $(filter-out $(MAIN_REL),$(C_RELS))
+ORDERED_RELS = $(MAIN_REL) $(OTHER_C_RELS) $(ASM_RELS)
 
 # ── Output ───────────────────────────────────────────────────────────────────
 TARGET   = bl4818-servo
@@ -61,6 +64,8 @@ CFLAGS += -DFLASH_TOTAL_SIZE=$(FLASH_TOTAL_SIZE)
 CFLAGS += -DLDROM_SIZE=$(LDROM_SIZE)
 CFLAGS += -DAPROM_SIZE=$(APROM_SIZE)
 
+ASFLAGS  = -plosgff
+
 # ── Linker Flags ─────────────────────────────────────────────────────────────
 LDFLAGS  = -m$(MCU)
 LDFLAGS += --model-small
@@ -69,6 +74,7 @@ LDFLAGS += --no-xinit-opt
 LDFLAGS += --xram-size $(XRAM_SIZE)
 LDFLAGS += --xram-loc $(XRAM_LOC)
 LDFLAGS += --code-size $(CODE_SIZE)
+LDFLAGS += --code-loc 0x0093
 LDFLAGS += --iram-size $(IRAM_SIZE)
 LDFLAGS += --stack-size $(STACK_SIZE)
 LDFLAGS += -o $(IHX)
@@ -84,6 +90,9 @@ $(BUILDDIR):
 
 $(BUILDDIR)/%.rel: $(SRCDIR)/%.c $(wildcard $(INCDIR)/*.h) | $(BUILDDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILDDIR)/%.rel: $(SRCDIR)/%.asm | $(BUILDDIR)
+	$(AS) $(ASFLAGS) -o $@ $<
 
 $(IHX): $(RELS) | $(BUILDDIR)
 	$(CC) $(LDFLAGS) $(ORDERED_RELS)
