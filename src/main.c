@@ -52,6 +52,9 @@ static uint8_t tach_debug_ticks;
 
 #if FEATURE_LOCAL_PWM_INPUT
 static volatile uint8_t local_input_locked_out;
+static uint8_t local_pwm_dc_hold_ms;
+static uint8_t local_fault_retry_count;
+static uint16_t local_fault_retry_ms;
 static volatile uint8_t local_pwm_seen_rise;
 static volatile uint8_t local_pwm_valid_cycles;
 static volatile uint8_t local_pwm_timeout_ms;
@@ -214,6 +217,9 @@ static void local_input_release(void)
     local_pwm_seen_rise = 0;
     local_pwm_valid_cycles = 0;
     local_pwm_timeout_ms = 0;
+    local_pwm_dc_hold_ms = 0;
+    local_fault_retry_count = 0;
+    local_fault_retry_ms = 0;
     local_pwm_high_ticks = 0;
     local_pwm_period_ticks = 0;
     EA = saved_ea;
@@ -262,6 +268,9 @@ static void local_input_init(void)
     local_pwm_seen_rise = 0;
     local_pwm_valid_cycles = 0;
     local_pwm_timeout_ms = 0;
+    local_pwm_dc_hold_ms = 0;
+    local_fault_retry_count = 0;
+    local_fault_retry_ms = 0;
     local_pwm_high_ticks = 0;
     local_pwm_period_ticks = 0;
     local_input_capture_enable();
@@ -278,6 +287,7 @@ static void local_input_poll_fast(void)
 
 static void local_input_update(void)
 {
+    uint8_t input_active;
     uint8_t saved_ea;
     uint8_t timeout_ms;
     uint8_t valid_cycles;
@@ -297,6 +307,18 @@ static void local_input_update(void)
         return;
     }
 
+    input_active = PWM_IN_PIN ? 0u : 1u;
+#if !LOCAL_PWM_ACTIVE_LOW
+    input_active = input_active ? 0u : 1u;
+#endif
+
+    if (input_active) {
+        if (local_pwm_dc_hold_ms < LOCAL_PWM_DC_FULLSCALE_MS)
+            local_pwm_dc_hold_ms++;
+    } else {
+        local_pwm_dc_hold_ms = 0;
+    }
+
     saved_ea = EA;
     EA = 0;
     if (local_pwm_timeout_ms != 0u)
@@ -307,7 +329,14 @@ static void local_input_update(void)
     period_ticks = local_pwm_period_ticks;
     EA = saved_ea;
 
+    if (local_pwm_dc_hold_ms >= LOCAL_PWM_DC_FULLSCALE_MS) {
+        abs_duty = PWM_MAX_DUTY;
+        goto apply_local_command;
+    }
+
     if (timeout_ms == 0u || valid_cycles < 2u || period_ticks == 0u) {
+        local_fault_retry_count = 0;
+        local_fault_retry_ms = 0;
         local_input_release();
         return;
     }
@@ -321,12 +350,29 @@ static void local_input_update(void)
     abs_duty = (uint16_t)(scaled_duty / period_ticks);
 
     if (abs_duty <= LOCAL_PWM_MIN_DUTY_COUNTS) {
+        local_fault_retry_count = 0;
+        local_fault_retry_ms = 0;
         local_input_release();
         return;
     }
 
     if (abs_duty > PWM_MAX_DUTY)
         abs_duty = PWM_MAX_DUTY;
+
+apply_local_command:
+    if (motor_get_state() == MOTOR_FAULT) {
+        if (local_fault_retry_ms != 0u) {
+            local_fault_retry_ms--;
+            return;
+        }
+
+        if (local_fault_retry_count >= LOCAL_FAULT_RETRY_MAX)
+            return;
+
+        motor_clear_fault();
+        local_fault_retry_count++;
+        local_fault_retry_ms = LOCAL_FAULT_RETRY_DELAY_MS;
+    }
 
     dir_positive = DIR_PIN ? 1u : 0u;
 #if LOCAL_PWM_DIR_INVERT

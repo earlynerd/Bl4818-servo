@@ -231,8 +231,11 @@ Legacy `PWM+DIR` input notes:
 - Before enumeration, `P0.4` PWM plus `P1.4` direction can still drive the motor.
 - `P0.4` is treated as active-low because the board has a pull-up to 5 V. Idle/high means zero torque, which makes a floating or disconnected command input fail safe.
 - PWM edges on `P0.4` are timestamped by Timer2 capture hardware rather than by software polling.
+- Continuous active level on `P0.4` is also accepted: if the input is held low for about `20 ms`, the firmware treats that as full local command, matching the stock board's grounded-input behavior.
 - The first valid enumerate packet stops any locally driven motion and hands ownership to serial until reboot.
-- This path expects a real PWM signal, not a static DC level. If PWM edges disappear for more than `50 ms`, the command drops to zero.
+- If PWM edges disappear for more than `50 ms` and the input is not being held continuously active, the local command drops to zero.
+- The default soft current limit is `3 A`, while the hard overcurrent fault remains `5 A`. That makes continuous grounded-input operation less aggressive out of the box; a serial master can still raise the torque limit explicitly.
+- In pre-enumeration local mode, a faulted motor will auto-clear and retry up to `3` times with a `250 ms` delay between attempts as long as the local command stays nonzero. Returning the local command to zero resets that retry budget.
 - Recommended PWM frequency is `50 Hz` to `2 kHz`. There is little benefit above `1 kHz` because the command is still applied on the `1 kHz` control tick.
 - Timer2 runs with a `/16` prescale in this mode, so at `24 MHz` the capture timestamp granularity is about `0.67 us` and the 16-bit counter spans about `43 ms`, which comfortably covers `50 Hz` PWM.
 - Because the edge timestamp is latched in hardware, ISR latency does not directly add measurement jitter. In practice the duty precision is now set mainly by timer quantization and input signal cleanliness, not by foreground firmware load.

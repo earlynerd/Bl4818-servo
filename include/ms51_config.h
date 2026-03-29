@@ -172,6 +172,7 @@
 #define ADC_RESOLUTION          4096    /* 12-bit ADC */
 #define CURRENT_LIMIT_MA        5000    /* 5A overcurrent threshold */
 #define CURRENT_WARN_MA         3000    /* Soft current limit for regulation */
+#define DEFAULT_TORQUE_LIMIT_MA CURRENT_WARN_MA  /* Safer out-of-box soft limit */
 #define BRAKE_COAST_CURRENT_MA  2500    /* Exit braking torque and coast above this current */
 
 /*
@@ -210,6 +211,9 @@
 /* ── Legacy Local Inputs ─────────────────────────────────────────────────── */
 #define FEATURE_LOCAL_PWM_INPUT    1       /* PWM+DIR active until serial enumeration */
 #define LOCAL_PWM_ACTIVE_LOW       1U      /* Pull-up on P0.4: idle/high = zero torque */
+#define LOCAL_PWM_DC_FULLSCALE_MS  20U     /* Continuous active level -> full local command */
+#define LOCAL_FAULT_RETRY_DELAY_MS 250U    /* Wait before each local auto-retry */
+#define LOCAL_FAULT_RETRY_MAX      3U      /* Retries per nonzero local command episode */
 #define LOCAL_PWM_TIMEOUT_MS       50U     /* Stop if PWM edges disappear */
 #define LOCAL_PWM_MIN_DUTY_COUNTS  4U      /* Treat near-zero input as stop */
 #define LOCAL_PWM_DIR_INVERT       0U      /* 0: DIR high = forward */

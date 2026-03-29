@@ -28,7 +28,7 @@ void motor_init(void)
     state = MOTOR_IDLE;
     fault = FAULT_NONE;
     target_duty = 0;
-    torque_limit_ma = CURRENT_LIMIT_MA;
+    torque_limit_ma = DEFAULT_TORQUE_LIMIT_MA;
     current_ma = 0;
 }
 

@@ -151,7 +151,7 @@ void flash_default_params(params_t *p)
 {
     p->magic        = PARAMS_MAGIC;
     p->mode         = MODE_OPEN_LOOP;
-    p->torque_limit = CURRENT_LIMIT_MA;
+    p->torque_limit = DEFAULT_TORQUE_LIMIT_MA;
     p->pid_pos_kp   = PID_POS_KP;
     p->pid_pos_ki   = PID_POS_KI;
     p->pid_pos_kd   = PID_POS_KD;
