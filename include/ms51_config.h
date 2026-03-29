@@ -208,5 +208,7 @@
 
 /* ── Feature Toggles ─────────────────────────────────────────────────────── */
 #define FEATURE_UART        1       /* Enable UART command interface */
+#define FEATURE_TACH_DEBUG  1       /* Toggle tach pin from control-loop timing */
+#define TACH_DEBUG_DIVIDER  1U      /* Square wave = CONTROL_LOOP_HZ / (2 * divider) */
 
 #endif /* MS51_CONFIG_H */

@@ -23,6 +23,7 @@
 #include "motor.h"
 #include "uart.h"
 #include "protocol.h"
+#include <stdint.h>
 
 /* Forward declarations */
 static void sys_init(void);
@@ -30,6 +31,12 @@ static void timer1_init(void);
 static void timer2_init(void);
 static void wdt_init(void);
 static void wdt_feed(void);
+static void tach_init(void);
+static void tach_debug_tick(void);
+
+#if FEATURE_TACH_DEBUG
+static uint8_t tach_debug_ticks;
+#endif
 
 void main(void)
 {
@@ -60,6 +67,7 @@ void main(void)
             TH1 = (65536 - (FSYS / 12 / CONTROL_LOOP_HZ)) >> 8;
             TL1 = (65536 - (FSYS / 12 / CONTROL_LOOP_HZ)) & 0xFF;
 
+            tach_debug_tick();
             motor_update();
             wdt_feed();
         }
@@ -77,6 +85,8 @@ static void sys_init(void)
     /* Direction input pin: P1.4 */
     P1M1 |=  0x10;
     P1M2 &= ~0x10;
+
+    tach_init();
 }
 
 static void timer1_init(void)
@@ -108,4 +118,26 @@ static void wdt_feed(void)
 {
     TIMED_ACCESS();
     WDCON |= 0x40;
+}
+
+static void tach_init(void)
+{
+    P0M1 &= (uint8_t)~0x20;  /* P0.5 push-pull output */
+    P0M2 |=  0x20;
+    TACH_PIN = 0;
+
+#if FEATURE_TACH_DEBUG
+    tach_debug_ticks = 0;
+#endif
+}
+
+static void tach_debug_tick(void)
+{
+#if FEATURE_TACH_DEBUG
+    tach_debug_ticks++;
+    if (tach_debug_ticks >= TACH_DEBUG_DIVIDER) {
+        tach_debug_ticks = 0;
+        TACH_PIN = !TACH_PIN;
+    }
+#endif
 }

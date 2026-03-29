@@ -4,6 +4,7 @@ ring_tool.py - Manual binary protocol helper for BL4818 production firmware
 
 Examples:
     python ring_tool.py -p COM7 enumerate
+    python ring_tool.py -p COM7 probe
     python ring_tool.py -p COM7 status 0
     python ring_tool.py -p COM7 set-duty 0 250
     python ring_tool.py -p COM7 torque 0 2500
@@ -294,6 +295,38 @@ def run_validate(client: BL4818RingClient, args: argparse.Namespace) -> None:
         print(f"last {format_status(last_addr, last_status)}")
 
 
+def parse_baud_list(spec: str) -> list[int]:
+    baud_list = []
+    for part in spec.split(","):
+        part = part.strip()
+        if part:
+            baud_list.append(int(part))
+    if not baud_list:
+        raise RingError("probe baud list is empty")
+    return baud_list
+
+
+def run_probe(port: str, timeout_ms: int, baud_list: list[int]) -> int:
+    print(f"probing port={port} bauds={','.join(str(v) for v in baud_list)}")
+    any_success = False
+
+    for baud in baud_list:
+        client = BL4818RingClient(port=port, baudrate=baud, timeout_ms=timeout_ms)
+        try:
+            client.open()
+            count = client.enumerate()
+            print(f"baud={baud} enumerate_ok devices={count}")
+            any_success = True
+        except RingTimeout as exc:
+            print(f"baud={baud} timeout {exc}")
+        except (RingError, serial.SerialException) as exc:
+            print(f"baud={baud} error {exc}")
+        finally:
+            client.close()
+
+    return 0 if any_success else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Direct binary protocol helper for BL4818 production firmware"
@@ -310,6 +343,15 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("ports", help="List available serial ports")
+    probe_parser = subparsers.add_parser(
+        "probe",
+        help="Try binary enumeration at one or more baud rates and print what responds",
+    )
+    probe_parser.add_argument(
+        "--bauds",
+        default="250000,115200",
+        help="Comma-separated baud rates to try (default: 250000,115200)",
+    )
     subparsers.add_parser("enumerate", help="Enumerate devices and print the count")
 
     status_parser = subparsers.add_parser("status", help="Query status from one addressed device")
@@ -379,6 +421,13 @@ def main() -> int:
         return 1
     if args.port is None:
         print(f"Auto-detected port: {port}")
+
+    if args.command == "probe":
+        try:
+            return run_probe(port, args.timeout_ms, parse_baud_list(args.bauds))
+        except RingError as exc:
+            print(f"ERROR: {exc}")
+            return 1
 
     client = BL4818RingClient(port=port, baudrate=args.baud, timeout_ms=args.timeout_ms)
 
