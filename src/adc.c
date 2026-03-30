@@ -48,9 +48,14 @@ void adc_init(void)
     ADCCON2 = 0x02;
 }
 
+/* Conversion takes ~14 ADC clocks at 12 MHz = ~1.2 µs.
+ * 255 poll iterations is orders of magnitude more than needed. */
+#define ADC_TIMEOUT_LOOPS  255u
+
 uint16_t adc_read(uint8_t channel)
 {
     uint16_t result;
+    uint8_t timeout = ADC_TIMEOUT_LOOPS;
 
     /* Select channel (ADCCON0 bits 3:0 = channel) */
     ADCCON0 = (channel & 0x0F);
@@ -59,8 +64,10 @@ uint16_t adc_read(uint8_t channel)
     ADCS = 1;
 
     /* Wait for conversion complete: ADCF (bit 7) set by hardware */
-    while (!ADCF)
-        ;
+    while (!ADCF) {
+        if (--timeout == 0)
+            return 0;  /* Hardware fault — return 0 (safe: no phantom current) */
+    }
 
     /* Clear completion flag */
     ADCF = 0;
@@ -90,28 +97,3 @@ uint16_t adc_read_current_ma(void)
     return (uint16_t)ma;
 }
 
-uint16_t adc_read_voltage_mv(void)
-{
-    uint16_t raw = adc_read(ADC_CH_VOLTAGE);
-
-    /*
-     * 10k/10k voltage divider (2:1 ratio). VDD = 5.0V reference.
-     *
-     * V_batt_mV = raw / 4096 × 5000 × 2
-     *           = raw × 10000 / 4096
-     *           ≈ raw × 625 / 256
-     *
-     * NOTE: With 2:1 divider and 5V ref, max measurable = 10V.
-     * At 12V nominal, divider output is 6V → clipped at 5V.
-     * Only useful for detecting battery voltages below ~10V.
-     */
-    uint32_t mv = (uint32_t)raw * 625 / 256;
-
-    return (uint16_t)mv;
-}
-
-uint8_t adc_overcurrent(void)
-{
-    uint16_t ma = adc_read_current_ma();
-    return (ma > CURRENT_LIMIT_MA) ? 1 : 0;
-}

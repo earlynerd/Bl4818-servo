@@ -157,13 +157,11 @@ uint8_t hall_poll(void)
     uint8_t current = hall_read();
 
     if (current == prev_hall)
-        return 0;  /* No change (debounce / noise) */
+        return HALL_POLL_NO_CHANGE;
 
     /* Detect invalid states */
-    if (current == 0 || current == 7) {
-        /* Hall sensor fault — don't update */
-        return 0;
-    }
+    if (current == 0 || current == 7)
+        return HALL_POLL_INVALID;
 
     /* Determine direction from state transition */
     if (hall_forward_seq[prev_hall] == current) {
@@ -181,7 +179,7 @@ uint8_t hall_poll(void)
     last_transition_time = now;
 
     prev_hall = current;
-    return 1;
+    return HALL_POLL_TRANSITION;
 }
 
 void hall_isr(void)

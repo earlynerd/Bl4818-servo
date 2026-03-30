@@ -33,7 +33,11 @@ int32_t hall_count(void);
 /* Reset hall counter */
 void hall_count_reset(void);
 
-/* Poll for hall transitions from a fast path; returns 1 when a valid edge was processed */
+/* Poll for hall transitions from a fast path.
+ * Returns: 0 = no change, 1 = valid transition, 2 = invalid hall state */
+#define HALL_POLL_NO_CHANGE  0
+#define HALL_POLL_TRANSITION 1
+#define HALL_POLL_INVALID    2
 uint8_t hall_poll(void);
 
 /* Compatibility wrapper for ISR-style call sites */

@@ -46,19 +46,12 @@
 #define APROM_SIZE          (FLASH_TOTAL_SIZE - LDROM_SIZE)
 #endif
 
-#define FLASH_PAGE_SIZE     128U
-#define PARAM_PAGE_ADDR     (APROM_SIZE - FLASH_PAGE_SIZE)
-
 #if FLASH_TOTAL_SIZE != 16384U
 #error "This firmware currently targets the 16 KB MS51FB9AE flash layout only."
 #endif
 
 #if (APROM_SIZE + LDROM_SIZE) != FLASH_TOTAL_SIZE
 #error "APROM_SIZE + LDROM_SIZE must match FLASH_TOTAL_SIZE."
-#endif
-
-#if (APROM_SIZE < FLASH_PAGE_SIZE) || ((APROM_SIZE % FLASH_PAGE_SIZE) != 0)
-#error "APROM_SIZE must be page-aligned and at least one flash page."
 #endif
 
 /* ── System Clock ────────────────────────────────────────────────────────── */
@@ -225,6 +218,12 @@
 #define LOCAL_PWM_TIMEOUT_MS       50U     /* Stop if PWM edges disappear */
 #define LOCAL_PWM_MIN_DUTY_COUNTS  4U      /* Treat near-zero input as stop */
 #define LOCAL_PWM_DIR_INVERT       0U      /* 0: DIR high = forward */
+
+/* ── Host Communication Timeout ──────────────────────────────────────────── */
+/* Stop motor if no valid command arrives within this many milliseconds.
+ * Only active once the device has been enumerated on the ring bus.
+ * Set to 0 to disable. */
+#define HOST_COMMS_TIMEOUT_MS   250u
 
 /* ── Feature Toggles ─────────────────────────────────────────────────────── */
 #define FEATURE_UART        1       /* Enable UART command interface */

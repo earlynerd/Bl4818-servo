@@ -34,6 +34,7 @@ static void wdt_init(void);
 static void wdt_feed(void);
 static void wdt_write(uint8_t value);
 static void wdt_set_bits(uint8_t mask);
+uint8_t wdt_reset_detected(void);
 static void tach_init(void);
 static void tach_debug_tick(void);
 static void local_input_poll_fast(void);
@@ -69,14 +70,28 @@ static int8_t local_drive_direction;
 static uint16_t local_reverse_coast_ms;
 #endif
 
+static void gate_pins_safe(void)
+{
+    /*
+     * Force all 6 gate drive pins LOW before any other init.
+     * On reset, pins default to quasi-bidirectional (weakly pulled high),
+     * which could briefly enable FETs. Drive them push-pull LOW immediately.
+     */
+    P1M1 &= ~0x07;  P1M2 |=  0x07;  /* P1.0, P1.1, P1.2 push-pull */
+    P0M1 &= ~0x0B;  P0M2 |=  0x0B;  /* P0.0, P0.1, P0.3 push-pull */
+    P11 = 0; P12 = 0;  /* Phase U */
+    P10 = 0; P00 = 0;  /* Phase V */
+    P01 = 0; P03 = 0;  /* Phase W */
+}
+
 void main(void)
 {
+    gate_pins_safe();
     wdt_feed();
     sys_init();
     wdt_init();
     adc_init();
     hall_init();
-    commutation_init();
     pwm_init();
 
 #if FEATURE_UART
@@ -201,12 +216,25 @@ static void wdt_set_bits(uint8_t mask)
     EA = saved_ea;
 }
 
+static uint8_t wdt_reset_occurred;
+
 static void wdt_init(void)
 {
 #if FEATURE_WATCHDOG
+    /* Check if the MCU was reset by the WDT before we clear anything */
+    wdt_reset_occurred = (WDCON & WDCON_WDTRF) ? 1u : 0u;
+
+    /* Enable WDT (this also clears WDTRF via the full register write) */
     wdt_write((uint8_t)(WDCON_WDTEN | (WDT_PRESCALER_BITS & WDCON_WPS_MASK)));
     wdt_feed();
+#else
+    wdt_reset_occurred = 0;
 #endif
+}
+
+uint8_t wdt_reset_detected(void)
+{
+    return wdt_reset_occurred;
 }
 
 static void wdt_feed(void)

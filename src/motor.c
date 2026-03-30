@@ -81,7 +81,16 @@ uint16_t motor_get_current(void)    { return current_ma; }
 
 void motor_poll_fast(void)
 {
-    if (!hall_poll())
+    uint8_t result = hall_poll();
+
+    if (result == HALL_POLL_INVALID) {
+        pwm_fault_brake();
+        state = MOTOR_FAULT;
+        fault = FAULT_HALL_INVALID;
+        return;
+    }
+
+    if (result != HALL_POLL_TRANSITION)
         return;
 
     if (state == MOTOR_RUN) {

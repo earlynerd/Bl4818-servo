@@ -15,7 +15,7 @@ typedef enum {
 typedef enum {
     FAULT_NONE          = 0,
     FAULT_OVERCURRENT   = 1,
-    FAULT_HALL_INVALID  = 3
+    FAULT_HALL_INVALID  = 2
 } fault_code_t;
 
 void motor_init(void);

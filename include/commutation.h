@@ -9,8 +9,6 @@
 
 #include <stdint.h>
 
-void commutation_init(void);
-
 void commutation_get_masks(uint8_t hall_state, int8_t direction,
                            uint8_t *pmen, uint8_t *pmd);
 

@@ -26,7 +26,7 @@ INCDIR   = include
 BUILDDIR = build
 
 # ── Sources ──────────────────────────────────────────────────────────────────
-EXCLUDE = $(SRCDIR)/pid.c $(SRCDIR)/encoder.c $(SRCDIR)/flash.c
+EXCLUDE = $(SRCDIR)/pid.c $(SRCDIR)/encoder.c
 SRCS = $(filter-out $(EXCLUDE),$(wildcard $(SRCDIR)/*.c))
 ASM_SRCS = $(SRCDIR)/vectors.asm
 C_RELS = $(patsubst $(SRCDIR)/%.c,$(BUILDDIR)/%.rel,$(SRCS))

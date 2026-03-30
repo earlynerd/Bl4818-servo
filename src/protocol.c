@@ -79,11 +79,22 @@ static uint8_t rx_timeout_ms;
 static uint16_t rx_forward_remaining;
 static uint8_t __xdata rx_broadcast_tx[PROTO_BROADCAST_FRAME_MAX];
 
+#if HOST_COMMS_TIMEOUT_MS
+static uint16_t host_comms_countdown;
+#endif
+
 static void protocol_restart_timeout(void)
 {
     if (rx_state != PROTO_RX_IDLE)
         rx_timeout_ms = PROTO_FRAME_TIMEOUT_MS;
 }
+
+#if HOST_COMMS_TIMEOUT_MS
+static void host_comms_kick(void)
+{
+    host_comms_countdown = HOST_COMMS_TIMEOUT_MS;
+}
+#endif
 
 static uint8_t crc8_update(uint8_t crc, uint8_t data)
 {
@@ -181,6 +192,10 @@ static void execute_addressed_command(void)
     uint16_t value_u16;
     int16_t value_i16;
 
+#if HOST_COMMS_TIMEOUT_MS
+    host_comms_kick();
+#endif
+
     if (rx_cmd == PROTO_CMD_SET_DUTY) {
         value_u16 = (uint16_t)(((uint16_t)rx_payload[0] << 8) | rx_payload[1]);
         value_i16 = (int16_t)value_u16;
@@ -215,16 +230,27 @@ void protocol_init(void)
     device_addr = PROTO_ADDR_UNASSIGNED;
     uart_rx_flush();
     protocol_reset();
+#if HOST_COMMS_TIMEOUT_MS
+    host_comms_countdown = HOST_COMMS_TIMEOUT_MS;
+#endif
 }
 
 void protocol_tick_1khz(void)
 {
-    if (rx_state == PROTO_RX_IDLE || rx_timeout_ms == 0u)
-        return;
+    if (rx_state != PROTO_RX_IDLE && rx_timeout_ms != 0u) {
+        rx_timeout_ms--;
+        if (rx_timeout_ms == 0u)
+            protocol_reset();
+    }
 
-    rx_timeout_ms--;
-    if (rx_timeout_ms == 0u)
-        protocol_reset();
+#if HOST_COMMS_TIMEOUT_MS
+    /* Stop motor if host goes silent after enumeration */
+    if (device_addr != PROTO_ADDR_UNASSIGNED && host_comms_countdown != 0u) {
+        host_comms_countdown--;
+        if (host_comms_countdown == 0u)
+            motor_stop();
+    }
+#endif
 }
 
 uint8_t protocol_is_enumerated(void)
@@ -402,8 +428,12 @@ void protocol_poll(void)
 
         case PROTO_RX_BROADCAST_CRC:
             if (c == rx_crc) {
-                if (rx_broadcast_consume)
+                if (rx_broadcast_consume) {
                     execute_set_duty((int16_t)(((uint16_t)rx_payload[0] << 8) | rx_payload[1]));
+#if HOST_COMMS_TIMEOUT_MS
+                    host_comms_kick();
+#endif
+                }
 
                 send_broadcast_tx();
             }
