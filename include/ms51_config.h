@@ -219,6 +219,7 @@
 #define LOCAL_PWM_ACTIVE_LOW       1U      /* Pull-up on P0.4: idle/high = zero torque */
 #define LOCAL_PWM_DC_FULLSCALE_MS  20U     /* Continuous active level -> full local command */
 #define LOCAL_PWM_RAMP_UP_MS       100U    /* Local command rises from 0 to full over this time */
+#define LOCAL_DIR_REVERSAL_COAST_MS 150U   /* Coast this long before allowing local reverse torque */
 #define LOCAL_FAULT_RETRY_DELAY_MS 250U    /* Wait before each local auto-retry */
 #define LOCAL_FAULT_RETRY_MAX      3U      /* Retries per nonzero local command episode */
 #define LOCAL_PWM_TIMEOUT_MS       50U     /* Stop if PWM edges disappear */

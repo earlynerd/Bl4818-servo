@@ -237,6 +237,7 @@ Safety warning:
 - Present protections are limited to a soft current pullback, a hard overcurrent fault, local-input ramping, and bounded local retries. Those help, but they are not a guarantee that the board, motor, or wiring cannot be overheated or damaged.
 - A commanded full-duty stall can still be destructive, especially if an external master raises the torque limit or repeatedly re-applies command after fault recovery.
 - The watchdog is only a hang-recovery mechanism. It can reset the MCU if the firmware stops making progress, but it does not by itself limit a still-running control loop that is actively commanding a bad operating point.
+- A commanded duty of `0` now maps to explicit coast / outputs-off rather than leaving the commutation state armed with zero PWM.
 - Until a better thermal / `I^2t` style derate exists, test with a current-limited supply and conservative torque / duty settings.
 
 Legacy `PWM+DIR` input notes:
@@ -246,6 +247,7 @@ Legacy `PWM+DIR` input notes:
 - PWM edges on `P0.4` are timestamped by Timer2 capture hardware rather than by software polling.
 - Continuous active level on `P0.4` is also accepted: if the input is held low for about `20 ms`, the firmware treats that as full local command, matching the stock board's grounded-input behavior.
 - Local command is slew-limited on the way up, so a step to full local input ramps from zero to full applied duty over about `100 ms` instead of hitting the bridge in one control tick.
+- A local direction reversal is interlocked: if `DIR` flips while a nonzero local command is active, the firmware coasts for about `150 ms` before it will apply reverse torque.
 - The first valid enumerate packet stops any locally driven motion and hands ownership to serial until reboot.
 - If PWM edges disappear for more than `50 ms` and the input is not being held continuously active, the local command drops to zero.
 - The default soft current limit is `3 A`, while the hard overcurrent fault remains `5 A`. That makes continuous grounded-input operation less aggressive out of the box; a serial master can still raise the torque limit explicitly.

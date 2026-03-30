@@ -48,6 +48,8 @@ void motor_start(void)
 {
     if (state == MOTOR_FAULT)
         return;
+    if (target_duty == 0)
+        return;
     int8_t dir = (target_duty >= 0) ? 1 : -1;
     fault = FAULT_NONE;
     state = MOTOR_RUN;
@@ -119,6 +121,11 @@ void motor_update(void)
 
     if (state != MOTOR_RUN)
         return;
+
+    if (target_duty == 0) {
+        motor_stop();
+        return;
+    }
 
     /* ── Duty with current limiting ──────────────────────────────── */
 

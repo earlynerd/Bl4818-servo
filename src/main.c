@@ -65,6 +65,8 @@ static volatile uint8_t local_pwm_timeout_ms;
 static volatile uint16_t local_pwm_last_rise;
 static volatile uint16_t local_pwm_high_ticks;
 static volatile uint16_t local_pwm_period_ticks;
+static int8_t local_drive_direction;
+static uint16_t local_reverse_coast_ms;
 #endif
 
 void main(void)
@@ -240,6 +242,7 @@ static void tach_debug_tick(void)
 static void local_input_stop_motion(void)
 {
     local_applied_abs_duty = 0;
+    local_drive_direction = 0;
     motor_set_duty(0);
 
     if (motor_get_state() == MOTOR_RUN)
@@ -259,6 +262,8 @@ static void local_input_release(void)
     local_fault_retry_count = 0;
     local_fault_retry_ms = 0;
     local_applied_abs_duty = 0;
+    local_drive_direction = 0;
+    local_reverse_coast_ms = 0;
     local_pwm_high_ticks = 0;
     local_pwm_period_ticks = 0;
     EA = saved_ea;
@@ -308,6 +313,8 @@ static void local_input_init(void)
     local_fault_retry_count = 0;
     local_fault_retry_ms = 0;
     local_applied_abs_duty = 0;
+    local_drive_direction = 0;
+    local_reverse_coast_ms = 0;
     local_pwm_high_ticks = 0;
     local_pwm_period_ticks = 0;
     local_input_capture_enable();
@@ -335,6 +342,7 @@ static void local_input_update(void)
     uint16_t pulse_ticks;
     uint16_t abs_duty;
     int16_t signed_duty;
+    int8_t requested_direction;
     uint8_t dir_positive;
 
     if (local_input_locked_out)
@@ -434,11 +442,29 @@ apply_local_command:
     dir_positive = dir_positive ? 0u : 1u;
 #endif
 
-    signed_duty = dir_positive ? (int16_t)abs_duty : -(int16_t)abs_duty;
+    requested_direction = dir_positive ? 1 : -1;
+
+    if (local_reverse_coast_ms != 0u) {
+        local_reverse_coast_ms--;
+        local_input_stop_motion();
+        return;
+    }
+
+    if (abs_duty != 0u &&
+        local_drive_direction != 0 &&
+        requested_direction != local_drive_direction) {
+        local_reverse_coast_ms = LOCAL_DIR_REVERSAL_COAST_MS;
+        local_input_stop_motion();
+        return;
+    }
+
+    signed_duty = (requested_direction > 0) ? (int16_t)abs_duty : -(int16_t)abs_duty;
     motor_set_duty(signed_duty);
 
     if (motor_get_state() == MOTOR_IDLE)
         motor_start();
+
+    local_drive_direction = requested_direction;
 }
 #else
 static void local_input_poll_fast(void) { }

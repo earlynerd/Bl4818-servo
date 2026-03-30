@@ -159,6 +159,11 @@ static void execute_set_duty(int16_t duty)
     if (duty < -(int16_t)PWM_MAX_DUTY || duty > (int16_t)PWM_MAX_DUTY)
         return;
 
+    if (duty == 0) {
+        motor_stop();
+        return;
+    }
+
     motor_set_duty(duty);
     motor_start();
 }
