@@ -50,12 +50,18 @@ __sfr __at(0x96) CKSWT;    /* TA protected — clock switch */
 
 /* ── Port Mode Registers ─────────────────────────────────────────────────── */
 __sfr __at(0xB1) P0M1;
+__sfr __at(0xB1) P0S;      /* Page 1: P0 Schmitt-trigger input select */
 __sfr __at(0xB2) P0M2;
+__sfr __at(0xB2) P0SR;     /* Page 1: P0 slew-rate select */
 __sfr __at(0xB3) P1M1;
+__sfr __at(0xB3) P1S;      /* Page 1: P1 Schmitt-trigger input select */
 __sfr __at(0xB4) P1M2;
+__sfr __at(0xB4) P1SR;     /* Page 1: P1 slew-rate select */
 /* P2M1/P2M2 not available on MS51FB9AE */
 __sfr __at(0xAC) P3M1;
+__sfr __at(0xAC) P3S;      /* Page 1: P3 Schmitt-trigger input select */
 __sfr __at(0xAD) P3M2;
+__sfr __at(0xAD) P3SR;     /* Page 1: P3 slew-rate select */
 
 /* ── Timer 2 ─────────────────────────────────────────────────────────────── */
 __sfr __at(0xC8) T2CON;

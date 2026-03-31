@@ -94,6 +94,18 @@ void uart_init(uint32_t baudrate)
     P0M1 |=  0x04;  /* P0.2 (RX) input */
     P0M2 &= ~0x04;
 
+    /*
+     * MS51 PxS bits select the digital input threshold per pin:
+     *   0 = TTL input
+     *   1 = Schmitt-trigger input
+     *
+     * Force the UART pins to TTL mode so a 3.3 V host can still meet the
+     * logic-high threshold while this MCU is running from the board's 5 V rail.
+     */
+    SFR_PAGE1();
+    P0S &= (uint8_t)~0x04;  /* P0.2 / UART1_RXD -> TTL input */
+    P1S &= (uint8_t)~0x40;  /* P1.6 / UART1_TXD input buffer -> TTL input */
+
     /* Timer 3 UART1 registers live on SFR page 0. */
     SFR_PAGE0();
 

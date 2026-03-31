@@ -54,6 +54,16 @@ void pwm_init(void)
     P0M1 &= ~0x0A;   /* Clear M1 for P0.1, P0.3 */
     P0M2 |=  0x0A;   /* Set M2 for push-pull */
 
+    /*
+     * Drive the six gate pins with the fastest edge rate the MS51 GPIO can
+     * provide. These pins feed the MOSFET gate-drive network directly and
+     * benefit from a stronger digital edge than the default slew setting.
+     */
+    SFR_PAGE1();
+    P1SR |= 0x07;    /* P1.0, P1.1, P1.2 -> high-speed slew */
+    P0SR |= 0x0B;    /* P0.0, P0.1, P0.3 -> high-speed slew */
+    SFR_PAGE0();
+
     /* All outputs LOW initially (all FETs off) */
     P11 = 0; P12 = 0;    /* Phase U */
     P10 = 0; P00 = 0;    /* Phase V */

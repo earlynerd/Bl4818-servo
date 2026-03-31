@@ -149,6 +149,28 @@
 #define UART1_RX_PIN    P02     /* P0.2 pin 18 - UART1_RXD / prog "S" */
 #define UART_BAUD       250000UL
 
+/*
+ * GPIO electrical policy for this board:
+ *
+ * Outputs
+ *   - PWM gate pins: push-pull, high-speed slew
+ *       P1.2, P1.1, P1.0, P0.0, P0.1, P0.3
+ *   - UART1 TX: push-pull, normal slew
+ *       P1.6
+ *   - Tach output: push-pull, normal slew
+ *       P0.5
+ *
+ * Inputs
+ *   - UART1 RX: input-only, TTL threshold for 3.3 V host compatibility
+ *       P0.2
+ *   - Hall inputs: input-only
+ *       P1.5, P1.7, P3.0
+ *   - Direction and local PWM inputs: input-only
+ *       P1.4, P0.4
+ *   - ADC pins: input-only with digital input disabled in AINDIDS
+ *       P0.6, P0.7
+ */
+
 /* LED — no dedicated LED pin identified; stock board may not have one */
 /* #define LED_PIN      P13 */  /* Could use spare pin 12 if LED added */
 
