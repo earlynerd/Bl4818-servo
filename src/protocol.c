@@ -132,6 +132,7 @@ static void send_broadcast_tx(void)
         uart_putc(rx_broadcast_tx[i]);
 
     uart_putc(broadcast_tx_crc());
+    uart_tx_flush();
 }
 
 static void send_status_binary(void)
@@ -155,6 +156,30 @@ static void send_status_binary(void)
     crc = crc8_update(crc, hall);
     uart_putc(hall);
     uart_putc(crc);
+    uart_tx_flush();
+}
+
+static void send_status_binary_with_state(uint8_t state)
+{
+    uint16_t current = motor_get_current();
+    uint8_t fault = (uint8_t)motor_get_fault();
+    uint8_t hall = hall_read();
+    uint8_t crc = PROTO_CRC8_INIT;
+
+    crc = crc8_update(crc, PROTO_SYNC_STATUS);
+    uart_putc(PROTO_SYNC_STATUS);
+    crc = crc8_update(crc, state);
+    uart_putc(state);
+    crc = crc8_update(crc, fault);
+    uart_putc(fault);
+    crc = crc8_update(crc, (uint8_t)(current >> 8));
+    uart_putc((uint8_t)(current >> 8));
+    crc = crc8_update(crc, (uint8_t)(current & 0xFFu));
+    uart_putc((uint8_t)(current & 0xFFu));
+    crc = crc8_update(crc, hall);
+    uart_putc(hall);
+    uart_putc(crc);
+    uart_tx_flush();
 }
 
 static uint8_t command_payload_len(uint8_t cmd)
@@ -179,6 +204,23 @@ static void execute_set_duty(int16_t duty)
     motor_start();
 }
 
+static uint8_t prepare_set_duty(int16_t duty)
+{
+    if (duty < -(int16_t)PWM_MAX_DUTY || duty > (int16_t)PWM_MAX_DUTY)
+        return 0u;
+
+    if (duty == 0) {
+        motor_stop();
+        return 0u;
+    }
+
+    if (motor_get_state() == MOTOR_FAULT)
+        return 0u;
+
+    motor_set_duty(duty);
+    return 1u;
+}
+
 static void execute_set_torque(uint16_t ma)
 {
     if (ma == 0u || ma > CURRENT_LIMIT_MA)
@@ -191,6 +233,7 @@ static void execute_addressed_command(void)
 {
     uint16_t value_u16;
     int16_t value_i16;
+    uint8_t start_after_reply = 0u;
 
 #if HOST_COMMS_TIMEOUT_MS
     host_comms_kick();
@@ -199,7 +242,14 @@ static void execute_addressed_command(void)
     if (rx_cmd == PROTO_CMD_SET_DUTY) {
         value_u16 = (uint16_t)(((uint16_t)rx_payload[0] << 8) | rx_payload[1]);
         value_i16 = (int16_t)value_u16;
-        execute_set_duty(value_i16);
+        start_after_reply = prepare_set_duty(value_i16);
+        if (start_after_reply) {
+            send_status_binary_with_state((uint8_t)MOTOR_RUN);
+            motor_start();
+        } else {
+            send_status_binary();
+        }
+        return;
     } else if (rx_cmd == PROTO_CMD_SET_TORQUE) {
         value_u16 = (uint16_t)(((uint16_t)rx_payload[0] << 8) | rx_payload[1]);
         execute_set_torque(value_u16);
@@ -428,14 +478,19 @@ void protocol_poll(void)
 
         case PROTO_RX_BROADCAST_CRC:
             if (c == rx_crc) {
+                uint8_t start_after_reply = 0u;
+
                 if (rx_broadcast_consume) {
-                    execute_set_duty((int16_t)(((uint16_t)rx_payload[0] << 8) | rx_payload[1]));
+                    start_after_reply = prepare_set_duty((int16_t)(((uint16_t)rx_payload[0] << 8) | rx_payload[1]));
 #if HOST_COMMS_TIMEOUT_MS
                     host_comms_kick();
 #endif
                 }
 
                 send_broadcast_tx();
+
+                if (start_after_reply)
+                    motor_start();
             }
             protocol_reset();
             break;

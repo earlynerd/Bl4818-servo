@@ -8,6 +8,15 @@ void SingleActuatorController::setGains(float kp, float kd)
     kd_ = kd;
 }
 
+void SingleActuatorController::setIntegralGain(float ki)
+{
+    if (ki < 0.0f) {
+        ki = 0.0f;
+    }
+
+    ki_ = ki;
+}
+
 void SingleActuatorController::setMaxDuty(int16_t maxDuty)
 {
     if (maxDuty < 0) {
@@ -35,11 +44,17 @@ void SingleActuatorController::setDirection(int8_t direction)
 void SingleActuatorController::setTargetDegrees(float targetDegrees)
 {
     targetDegrees_ = targetDegrees;
+    integralError_ = 0.0f;
 }
 
 float SingleActuatorController::kp() const
 {
     return kp_;
+}
+
+float SingleActuatorController::ki() const
+{
+    return ki_;
 }
 
 float SingleActuatorController::kd() const
@@ -82,6 +97,7 @@ void SingleActuatorController::reset()
     positionDegrees_ = 0.0f;
     lastPositionDegrees_ = 0.0f;
     velocityDegreesPerSecond_ = 0.0f;
+    integralError_ = 0.0f;
     dutyCommand_ = 0;
 }
 
@@ -104,6 +120,7 @@ void SingleActuatorController::update(uint16_t rawAngle, float dtSeconds)
         positionDegrees_ = 0.0f;
         lastPositionDegrees_ = 0.0f;
         velocityDegreesPerSecond_ = 0.0f;
+        integralError_ = 0.0f;
         dutyCommand_ = 0;
         return;
     }
@@ -127,7 +144,31 @@ void SingleActuatorController::update(uint16_t rawAngle, float dtSeconds)
     lastPositionDegrees_ = positionDegrees_;
 
     const float positionError = targetDegrees_ - positionDegrees_;
-    const float output = (kp_ * positionError) - (kd_ * velocityDegreesPerSecond_);
+    const float proposedIntegral = integralError_ + (positionError * dtSeconds);
+    float integralLimit = 0.0f;
+    float clampedIntegral = proposedIntegral;
+
+    if (ki_ > 0.0f) {
+        integralLimit = static_cast<float>(maxDuty_) / ki_;
+        if (clampedIntegral > integralLimit) {
+            clampedIntegral = integralLimit;
+        } else if (clampedIntegral < -integralLimit) {
+            clampedIntegral = -integralLimit;
+        }
+    } else {
+        clampedIntegral = 0.0f;
+    }
+
+    const float proportional = kp_ * positionError;
+    const float derivative = kd_ * velocityDegreesPerSecond_;
+    const float outputWithoutNewIntegral = proportional + (ki_ * integralError_) - derivative;
+
+    if (!((outputWithoutNewIntegral >= static_cast<float>(maxDuty_) && positionError > 0.0f) ||
+          (outputWithoutNewIntegral <= -static_cast<float>(maxDuty_) && positionError < 0.0f))) {
+        integralError_ = clampedIntegral;
+    }
+
+    const float output = proportional + (ki_ * integralError_) - derivative;
 
     dutyCommand_ = clampDuty(output, maxDuty_);
 }
@@ -142,6 +183,7 @@ void SingleActuatorController::zeroAtCurrentPosition()
     positionDegrees_ = 0.0f;
     lastPositionDegrees_ = 0.0f;
     velocityDegreesPerSecond_ = 0.0f;
+    integralError_ = 0.0f;
     dutyCommand_ = 0;
 }
 

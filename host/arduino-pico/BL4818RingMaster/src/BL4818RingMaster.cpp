@@ -5,6 +5,7 @@
 BL4818RingMaster::BL4818RingMaster(Stream &io)
     : io_(io),
       timeoutMs_(20),
+      trace_(nullptr),
       lastError_(Error::None),
       deviceCount_(0),
       nextQueryAddress_(0),
@@ -20,6 +21,16 @@ void BL4818RingMaster::setTimeoutMs(uint32_t timeoutMs)
 uint32_t BL4818RingMaster::timeoutMs() const
 {
     return timeoutMs_;
+}
+
+void BL4818RingMaster::setTraceStream(Stream *trace)
+{
+    trace_ = trace;
+}
+
+bool BL4818RingMaster::traceEnabled() const
+{
+    return trace_ != nullptr;
 }
 
 bool BL4818RingMaster::isEnumerated() const
@@ -66,15 +77,58 @@ const char *BL4818RingMaster::errorString(Error error)
 
 void BL4818RingMaster::clearInput()
 {
+    uint8_t discarded[32];
+    size_t discardedCount = 0;
+    bool truncated = false;
+
     while (io_.available() > 0) {
-        io_.read();
+        int value = io_.read();
+        if (value < 0) {
+            continue;
+        }
+
+        if (discardedCount < sizeof(discarded)) {
+            discarded[discardedCount++] = static_cast<uint8_t>(value);
+        } else {
+            truncated = true;
+        }
     }
+
+    if (discardedCount > 0 || truncated) {
+        traceBytes("drop", discarded, discardedCount, truncated);
+    }
+}
+
+void BL4818RingMaster::traceBytes(const char *label, const uint8_t *data, size_t length, bool truncated)
+{
+    if (!trace_) {
+        return;
+    }
+
+    trace_->print("ring ");
+    trace_->print(label);
+    trace_->print(':');
+
+    for (size_t index = 0; index < length; ++index) {
+        trace_->print(' ');
+        if (data[index] < 0x10u) {
+            trace_->print('0');
+        }
+        trace_->print(data[index], HEX);
+    }
+
+    if (truncated) {
+        trace_->print(" ...");
+    }
+
+    trace_->println();
 }
 
 bool BL4818RingMaster::enumerate(uint8_t &deviceCount)
 {
     uint8_t packet[3] = {kSyncEnumerate, 0x00, 0x00};
     uint8_t response[3];
+    static const uint8_t kEnumeratePrefix[] = {kSyncEnumerate};
 
     packet[2] = crc8(packet, 2);
 
@@ -84,12 +138,7 @@ bool BL4818RingMaster::enumerate(uint8_t &deviceCount)
         return false;
     }
 
-    if (!readExact(response, sizeof(response))) {
-        return false;
-    }
-
-    if (response[0] != kSyncEnumerate || response[2] != crc8(response, 2)) {
-        setError(Error::BadResponse);
+    if (!readValidFrame(response, sizeof(response), kEnumeratePrefix, sizeof(kEnumeratePrefix))) {
         return false;
     }
 
@@ -105,6 +154,7 @@ bool BL4818RingMaster::broadcastDuty(const int16_t *duties, uint8_t count)
 {
     uint8_t packet[kMaxBroadcastFrameSize];
     uint8_t response[3];
+    static const uint8_t kBroadcastPrefix[] = {kSyncBroadcast, 0x00};
     uint8_t index;
 
     if (!requireEnumerated()) {
@@ -133,12 +183,7 @@ bool BL4818RingMaster::broadcastDuty(const int16_t *duties, uint8_t count)
         return false;
     }
 
-    if (!readExact(response, sizeof(response))) {
-        return false;
-    }
-
-    if (response[0] != kSyncBroadcast || response[1] != 0x00 || response[2] != crc8(response, 2)) {
-        setError(Error::BadResponse);
+    if (!readValidFrame(response, sizeof(response), kBroadcastPrefix, sizeof(kBroadcastPrefix))) {
         return false;
     }
 
@@ -218,6 +263,8 @@ bool BL4818RingMaster::validateAddress(uint8_t address) const
 
 bool BL4818RingMaster::writeExact(const uint8_t *data, size_t length)
 {
+    traceBytes("tx", data, length);
+
     if (io_.write(data, length) != length) {
         setError(Error::ShortWrite);
         return false;
@@ -242,6 +289,7 @@ bool BL4818RingMaster::readExact(uint8_t *data, size_t length)
         }
 
         if (static_cast<uint32_t>(millis() - lastByteAt) >= timeoutMs_) {
+            traceBytes("rx-timeout", data, received);
             setError(Error::Timeout);
             return false;
         }
@@ -249,7 +297,61 @@ bool BL4818RingMaster::readExact(uint8_t *data, size_t length)
         yield();
     }
 
+    traceBytes("rx", data, received);
     return true;
+}
+
+bool BL4818RingMaster::readValidFrame(uint8_t *data, size_t length, const uint8_t *prefix, size_t prefixLength)
+{
+    size_t buffered = 0;
+    uint8_t observed[64];
+    size_t observedCount = 0;
+    bool observedTruncated = false;
+    uint32_t lastByteAt = millis();
+
+    if (!data || length == 0 || !prefix || prefixLength == 0 || prefixLength >= length) {
+        setError(Error::InvalidArgument);
+        return false;
+    }
+
+    while (true) {
+        if (io_.available() > 0) {
+            int value = io_.read();
+            if (value >= 0) {
+                if (observedCount < sizeof(observed)) {
+                    observed[observedCount++] = static_cast<uint8_t>(value);
+                } else {
+                    observedTruncated = true;
+                }
+
+                if (buffered < length) {
+                    data[buffered++] = static_cast<uint8_t>(value);
+                } else {
+                    memmove(data, data + 1, length - 1);
+                    data[length - 1] = static_cast<uint8_t>(value);
+                }
+
+                lastByteAt = millis();
+
+                if (buffered >= length &&
+                    memcmp(data, prefix, prefixLength) == 0 &&
+                    data[length - 1] == crc8(data, length - 1)) {
+                    traceBytes("rx", observed, observedCount, observedTruncated);
+                    setError(Error::None);
+                    return true;
+                }
+            }
+            continue;
+        }
+
+        if (static_cast<uint32_t>(millis() - lastByteAt) >= timeoutMs_) {
+            traceBytes("rx-timeout", observed, observedCount, observedTruncated);
+            setError(Error::Timeout);
+            return false;
+        }
+
+        yield();
+    }
 }
 
 uint8_t BL4818RingMaster::crc8(const uint8_t *data, size_t length) const
@@ -275,13 +377,9 @@ uint8_t BL4818RingMaster::crc8(const uint8_t *data, size_t length) const
 bool BL4818RingMaster::readStatus(Status &status)
 {
     uint8_t frame[kStatusFrameSize];
+    static const uint8_t kStatusPrefix[] = {kSyncStatus};
 
-    if (!readExact(frame, sizeof(frame))) {
-        return false;
-    }
-
-    if (frame[0] != kSyncStatus || frame[6] != crc8(frame, 6)) {
-        setError(Error::BadResponse);
+    if (!readValidFrame(frame, sizeof(frame), kStatusPrefix, sizeof(kStatusPrefix))) {
         return false;
     }
 

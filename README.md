@@ -163,6 +163,33 @@ python flash.py --target-power on
 python flash.py --power-cycle-connect --info
 ```
 
+### Checked-In Config Workflow
+
+The authoritative target config profiles now live in `ms51_flash_config.py`.
+That file is checked in so the project can carry its preferred MS51 config in
+source control instead of relying on someone remembering raw hex from a prior
+session.
+
+Typical config flow:
+
+```bash
+python flash.py --list-config-profiles
+python flash.py --write-config
+python flash.py --write-config --config-profile servo-bor-3v7
+python flash.py --write-config --config-bytes "FF FF DF FF 5F"
+```
+
+Notes:
+
+- `--write-config` writes `PROJECT_DEFAULT_PROFILE` from `ms51_flash_config.py`
+- `--recover` writes `PROJECT_RECOVERY_PROFILE`
+- `--config-profile` selects another checked-in profile
+- `--config-bytes` is for one-off raw 5-byte writes
+- `--bod-threshold`, `--bod`, `--bor-reset`, `--boiap`, and `--wdt-config`
+  can override a selected profile at write time
+- The firmware still enables the watchdog at runtime in `src/main.c`; `CONFIG4`
+  only controls the reset-time default mode
+
 When the Pico bridge is idle, its secondary USB CDC "debug" port now passes
 through the target MCU UART on the programming header pins. As soon as the host
 starts a Nu-Link `CONNECT`/power-control session, that pass-through is disabled

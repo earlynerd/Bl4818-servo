@@ -18,6 +18,7 @@ Requires: pyserial (pip install pyserial)
 
 import argparse
 import os
+import re
 import sys
 import time
 
@@ -70,7 +71,33 @@ POLL_INTERVAL    = 0.01
 
 DEFAULT_POWER_OFF_MS = 50
 DEFAULT_RECOVERY_DELAYS_US = [100, 250, 500, 1000, 2000, 5000, 10000, 20000]
-SAFE_FACTORY_CONFIG = bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF])
+BOD_THRESHOLD_BITS = {"4.4": 0x00, "3.7": 0x10, "2.7": 0x20, "2.2": 0x30}
+WDT_MODE_BITS = {"software": 0xF0, "idle-stop": 0x50, "always": 0x00}
+
+DEFAULT_CONFIG_PROFILES = {
+    "factory-safe": {
+        "bytes": bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF]),
+        "description": (
+            "APROM boot, reset pin enabled, unlocked, no LDROM, "
+            "BOD/BOR enabled at 2.2V, WDT software-controlled"
+        ),
+    },
+}
+DEFAULT_PROJECT_DEFAULT_PROFILE = "factory-safe"
+DEFAULT_PROJECT_RECOVERY_PROFILE = "factory-safe"
+
+try:
+    from ms51_flash_config import (  # type: ignore
+        CONFIG_PROFILES,
+        PROJECT_DEFAULT_PROFILE,
+        PROJECT_RECOVERY_PROFILE,
+    )
+except ImportError:
+    CONFIG_PROFILES = DEFAULT_CONFIG_PROFILES
+    PROJECT_DEFAULT_PROFILE = DEFAULT_PROJECT_DEFAULT_PROFILE
+    PROJECT_RECOVERY_PROFILE = DEFAULT_PROJECT_RECOVERY_PROFILE
+
+SAFE_FACTORY_CONFIG = bytes(DEFAULT_CONFIG_PROFILES["factory-safe"]["bytes"])
 
 # MS51FB9AE specifics
 MS51FB9AE_DEVIDS = {0x4B20, 0x4B21}
@@ -125,6 +152,126 @@ def is_safe_factory_config(config_bytes):
 
 class ISPError(Exception):
     pass
+
+
+def normalize_config_bytes(config_bytes):
+    config_bytes = bytes(config_bytes)
+    if len(config_bytes) != 5:
+        raise ValueError("Config must contain exactly 5 bytes")
+    return config_bytes
+
+
+def format_config_bytes(config_bytes):
+    return " ".join(f"{b:02X}" for b in normalize_config_bytes(config_bytes))
+
+
+def get_config_profile(profile_name):
+    profile = CONFIG_PROFILES.get(profile_name)
+    if profile is None:
+        raise ValueError(f"Unknown config profile: {profile_name}")
+    config_bytes = normalize_config_bytes(profile["bytes"])
+    description = profile.get("description", "")
+    return config_bytes, description
+
+
+def print_config_profiles():
+    print("Checked-in config profiles:")
+    print(f"  default : {PROJECT_DEFAULT_PROFILE}")
+    print(f"  recovery: {PROJECT_RECOVERY_PROFILE}")
+    for name in sorted(CONFIG_PROFILES.keys()):
+        config_bytes, description = get_config_profile(name)
+        suffix = f" - {description}" if description else ""
+        print(f"  {name:18s} [{format_config_bytes(config_bytes)}]{suffix}")
+
+
+def parse_config_bytes(text):
+    tokens = [tok for tok in re.split(r"[\s,]+", text.strip()) if tok]
+    if len(tokens) != 5:
+        raise ValueError("Expected exactly 5 config bytes, e.g. 'FF FF FF FF FF'")
+
+    config = []
+    for token in tokens:
+        token = token[2:] if token.lower().startswith("0x") else token
+        if len(token) == 0 or len(token) > 2:
+            raise ValueError(f"Invalid config byte: {token}")
+        config.append(int(token, 16))
+    return bytes(config)
+
+
+def config_override_requested(args):
+    return any((
+        args.bod_threshold is not None,
+        args.bod is not None,
+        args.bor_reset is not None,
+        args.boiap is not None,
+        args.wdt_config is not None,
+    ))
+
+
+def apply_config_overrides(config_bytes, args):
+    config = bytearray(normalize_config_bytes(config_bytes))
+
+    if args.bod is not None:
+        if args.bod == "on":
+            config[2] |= 0x80
+        else:
+            config[2] &= ~0x80
+
+    if args.bor_reset is not None:
+        if args.bor_reset == "on":
+            config[2] |= 0x04
+        else:
+            config[2] &= ~0x04
+
+    if args.boiap is not None:
+        if args.boiap == "inhibit":
+            config[2] |= 0x08
+        else:
+            config[2] &= ~0x08
+
+    if args.bod_threshold is not None:
+        config[2] = (config[2] & ~0x30) | BOD_THRESHOLD_BITS[args.bod_threshold]
+
+    if args.wdt_config is not None:
+        config[4] = (config[4] & 0x0F) | WDT_MODE_BITS[args.wdt_config]
+
+    return bytes(config)
+
+
+def validate_config_bytes(config_bytes, allow_unsafe=False):
+    config_bytes = normalize_config_bytes(config_bytes)
+    c0 = config_bytes[0]
+    ldrom_size = decode_ldrom_size_kb(config_bytes)
+    problems = []
+
+    if not (c0 & 0x04):
+        problems.append("RPD=0 disables the reset pin and can block ICP entry")
+    if not (c0 & 0x80) and ldrom_size == 0:
+        problems.append("CBS=0 selects LDROM boot but no LDROM is reserved")
+    if not (c0 & 0x02):
+        problems.append("LOCK=0 locks flash and breaks config readback verification")
+
+    if problems and not allow_unsafe:
+        raise ISPError("Refusing unsafe config:\n  - " + "\n  - ".join(problems))
+
+    return problems
+
+
+def resolve_requested_config(args, default_profile_name):
+    if args.config_profile and args.config_bytes:
+        raise ISPError("Use either --config-profile or --config-bytes, not both")
+
+    if args.config_bytes:
+        config_bytes = parse_config_bytes(args.config_bytes)
+        label = "raw config bytes"
+    else:
+        profile_name = args.config_profile or default_profile_name
+        config_bytes, description = get_config_profile(profile_name)
+        label = f"profile '{profile_name}'"
+        if description:
+            label += f" ({description})"
+
+    return apply_config_overrides(config_bytes, args), label
 
 class ISPProgrammer:
     def __init__(self, port, baudrate=115200):
@@ -427,21 +574,24 @@ class ISPProgrammer:
 
     def write_safe_factory_config(self):
         """Restore the known-safe factory config and verify it by readback."""
-        self.require_icp_bridge("Safe config restore")
-        new_config = SAFE_FACTORY_CONFIG
-        if not is_safe_factory_config(new_config):
+        if not is_safe_factory_config(SAFE_FACTORY_CONFIG):
             raise ISPError("Internal error: safe factory config validation failed")
+        self.write_verified_config(SAFE_FACTORY_CONFIG, "safe factory config")
 
-        print("\n  Writing safe factory config: APROM boot, unlocked, full 16KB APROM")
+    def write_verified_config(self, config_bytes, label="config"):
+        """Write config bytes, read them back, and verify an exact match."""
+        self.require_icp_bridge("Config writes")
+        config_bytes = normalize_config_bytes(config_bytes)
         old_config = self.read_config()
-        print(f"  Old config: [{' '.join(f'0x{b:02X}' for b in old_config)}]")
-        print(f"  New config: [{' '.join(f'0x{b:02X}' for b in new_config)}]")
-        self.write_config(new_config)
+        print(f"\n  Writing {label}")
+        print(f"  Old config: [{format_config_bytes(old_config)}]")
+        print(f"  New config: [{format_config_bytes(config_bytes)}]")
+        self.write_config(config_bytes)
         verify = self.read_config()
-        print(f"  Readback:   [{' '.join(f'0x{b:02X}' for b in verify)}]")
+        print(f"  Readback:   [{format_config_bytes(verify)}]")
         self._print_config(verify)
-        if verify[:5] != new_config[:5]:
-            raise ISPError("Config readback doesn't match safe factory config")
+        if verify[:5] != config_bytes[:5]:
+            raise ISPError("Config readback doesn't match requested config")
         print("  Config write verified OK.")
 
     # ── Flash Operations ────────────────────────────────────────────────
@@ -602,13 +752,31 @@ def main():
     parser.add_argument("--no-verify", action="store_true",
         help="Skip auto-verification (when FW supports it)")
     parser.add_argument("--write-config", action="store_true",
-        help="Write factory-default config (APROM boot, unlocked, no LDROM)")
+        help=f"Write the checked-in default config profile ({PROJECT_DEFAULT_PROFILE})")
+    parser.add_argument("--list-config-profiles", action="store_true",
+        help="List checked-in config profiles and exit")
+    parser.add_argument("--config-profile", choices=sorted(CONFIG_PROFILES.keys()),
+        help="Config profile name from ms51_flash_config.py")
+    parser.add_argument("--config-bytes",
+        help="Five raw config bytes, e.g. 'FF FF FF FF FF'")
+    parser.add_argument("--bod-threshold", choices=("4.4", "3.7", "2.7", "2.2"),
+        help="Override CONFIG2 brown-out threshold in volts")
+    parser.add_argument("--bod", choices=("on", "off"),
+        help="Override CONFIG2 brown-out detect enable")
+    parser.add_argument("--bor-reset", choices=("on", "off"),
+        help="Override CONFIG2 brown-out reset enable")
+    parser.add_argument("--boiap", choices=("inhibit", "allow"),
+        help="Override CONFIG2 IAP behavior during brown-out")
+    parser.add_argument("--wdt-config", choices=("software", "idle-stop", "always"),
+        help="Override CONFIG4 WDT mode")
+    parser.add_argument("--allow-unsafe-config", action="store_true",
+        help="Allow config writes that disable reset pin, lock flash, or boot LDROM with no LDROM")
     parser.add_argument("--erase", action="store_true",
         help="Erase APROM only (preserves LDROM/config on the custom bridge)")
     parser.add_argument("--chip-erase", action="store_true",
         help="Full-chip erase via the custom bridge (erases APROM, LDROM, and config)")
     parser.add_argument("--recover", action="store_true",
-        help="Recover a bricked target: power-cycle connect, full-chip erase, restore safe config, then exit")
+        help=f"Recover a bricked target: power-cycle connect, full-chip erase, restore the recovery config profile ({PROJECT_RECOVERY_PROFILE}), then exit")
     parser.add_argument("--power-cycle-connect", action="store_true",
         help="If normal connect fails, try recovery connect using switched target power")
     parser.add_argument("--power-off-ms", type=int, default=DEFAULT_POWER_OFF_MS,
@@ -618,6 +786,14 @@ def main():
     parser.add_argument("--target-power", choices=("on", "off"),
         help="Switch target VDD through the bridge and exit")
     args = parser.parse_args()
+
+    if args.list_config_profiles:
+        print_config_profiles()
+        return 0
+
+    if (args.config_profile or args.config_bytes or config_override_requested(args)) and not (args.write_config or args.recover):
+        print("ERROR: config selection/override options require --write-config or --recover")
+        return 1
 
     # Resolve port
     port = args.port
@@ -669,8 +845,10 @@ def main():
             if dev_id not in MS51FB9AE_DEVIDS:
                 print(f"ERROR: refusing to write config to unknown device 0x{dev_id:04X}")
                 return 1
-            print("\n  Restoring safe factory config after recovery")
-            prog.write_safe_factory_config()
+            requested_config, requested_label = resolve_requested_config(args, PROJECT_RECOVERY_PROFILE)
+            validate_config_bytes(requested_config, args.allow_unsafe_config)
+            print(f"\n  Restoring {requested_label} after recovery")
+            prog.write_verified_config(requested_config, requested_label)
             run_aprom_on_close = True
             return 0
 
@@ -686,7 +864,9 @@ def main():
             if dev_id not in MS51FB9AE_DEVIDS:
                 print(f"ERROR: refusing to write config to unknown device 0x{dev_id:04X}")
                 return 1
-            prog.write_safe_factory_config()
+            requested_config, requested_label = resolve_requested_config(args, PROJECT_DEFAULT_PROFILE)
+            validate_config_bytes(requested_config, args.allow_unsafe_config)
+            prog.write_verified_config(requested_config, requested_label)
             run_aprom_on_close = True
 
         if args.info:

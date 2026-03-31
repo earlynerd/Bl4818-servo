@@ -7,12 +7,14 @@ public:
     static constexpr int32_t kCountsPerRevolution = 16384;
 
     void setGains(float kp, float kd);
+    void setIntegralGain(float ki);
     void setMaxDuty(int16_t maxDuty);
     void setVelocityAlpha(float alpha);
     void setDirection(int8_t direction);
     void setTargetDegrees(float targetDegrees);
 
     float kp() const;
+    float ki() const;
     float kd() const;
     float velocityAlpha() const;
     int16_t maxDuty() const;
@@ -45,8 +47,10 @@ private:
     float velocityDegreesPerSecond_ = 0.0f;
 
     float kp_ = 0.0f;
+    float ki_ = 0.0f;
     float kd_ = 0.0f;
     float velocityAlpha_ = 0.2f;
+    float integralError_ = 0.0f;
     int16_t maxDuty_ = 0;
     int8_t direction_ = 1;
     int16_t dutyCommand_ = 0;

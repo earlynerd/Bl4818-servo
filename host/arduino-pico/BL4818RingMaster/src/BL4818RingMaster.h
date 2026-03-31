@@ -39,6 +39,8 @@ public:
 
     void setTimeoutMs(uint32_t timeoutMs);
     uint32_t timeoutMs() const;
+    void setTraceStream(Stream *trace);
+    bool traceEnabled() const;
 
     bool isEnumerated() const;
     uint8_t deviceCount() const;
@@ -68,16 +70,19 @@ private:
 
     Stream &io_;
     uint32_t timeoutMs_;
+    Stream *trace_;
     Error lastError_;
     uint8_t deviceCount_;
     uint8_t nextQueryAddress_;
     bool enumerated_;
 
     void setError(Error error);
+    void traceBytes(const char *label, const uint8_t *data, size_t length, bool truncated = false);
     bool requireEnumerated();
     bool validateAddress(uint8_t address) const;
     bool writeExact(const uint8_t *data, size_t length);
     bool readExact(uint8_t *data, size_t length);
+    bool readValidFrame(uint8_t *data, size_t length, const uint8_t *prefix, size_t prefixLength);
     uint8_t crc8(const uint8_t *data, size_t length) const;
     bool readStatus(Status &status);
     bool sendAddressed(uint8_t address, Command command, const uint8_t *payload, uint8_t payloadLength, Status *status);

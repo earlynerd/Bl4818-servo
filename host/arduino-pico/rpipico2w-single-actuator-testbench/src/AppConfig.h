@@ -23,6 +23,8 @@ constexpr uint8_t kEncoderCount = 1;
 constexpr uint32_t kControlRateHz = 1000;
 constexpr uint32_t kControlPeriodUs = 1000000UL / kControlRateHz;
 constexpr float kControlDt = 1.0f / static_cast<float>(kControlRateHz);
+constexpr uint32_t kCommandRateHz = 200;
+constexpr uint32_t kCommandPeriodUs = 1000000UL / kCommandRateHz;
 
 constexpr uint32_t kStatusPollPeriodMs = 25;
 constexpr uint32_t kTelemetryPeriodMs = 50;
@@ -31,9 +33,13 @@ constexpr float kDefaultHomeTargetDeg = 0.0f;
 constexpr float kDefaultStrikeTargetDeg = 35.0f;
 constexpr uint32_t kDefaultTapHoldMs = 35;
 
-constexpr float kDefaultKp = 10.0f;
+constexpr float kDefaultKp = 5.0f;
+constexpr float kDefaultKi = 6.0f;
 constexpr float kDefaultKd = 0.04f;
 constexpr float kDefaultVelocityAlpha = 0.2f;
 constexpr int16_t kDefaultMaxDuty = 350;
+constexpr int16_t kDutyDeadband = 0;
+constexpr int16_t kDutySlewPerCommand = 16;
+constexpr uint8_t kMaxConsecutiveCommFailures = 3;
 
 }  // namespace AppConfig

@@ -3,14 +3,14 @@
 #include <BL4818RingMaster.h>
 #include <stdlib.h>
 #include <string.h>
-
 #include "AppConfig.h"
 #include "As5047Chain.h"
 #include "SingleActuatorController.h"
 
 namespace {
+static SerialPIO target_uart(12, 11, 256);
 
-BL4818RingMaster gRing(Serial1);
+BL4818RingMaster gRing(target_uart);
 As5047Chain gEncoders(SPI, AppConfig::kSpiCsPin);
 SingleActuatorController gController;
 
@@ -25,15 +25,19 @@ bool gRingReady = false;
 bool gArmed = false;
 bool gStreamTelemetry = false;
 bool gTapActive = false;
+bool gRingTraceEnabled = true;
 
 float gHomeTargetDeg = AppConfig::kDefaultHomeTargetDeg;
 float gStrikeTargetDeg = AppConfig::kDefaultStrikeTargetDeg;
 uint32_t gTapHoldMs = AppConfig::kDefaultTapHoldMs;
 
 uint32_t gNextControlAtUs = 0;
+uint32_t gNextCommandAtUs = 0;
 uint32_t gLastStatusPollAtMs = 0;
 uint32_t gLastTelemetryAtMs = 0;
 uint32_t gTapReturnAtMs = 0;
+int16_t gAppliedDutyCommand = 0;
+uint8_t gConsecutiveRingFailures = 0;
 
 char gLineBuffer[96];
 uint8_t gLineLength = 0;
@@ -43,9 +47,45 @@ bool timeReached(uint32_t now, uint32_t target)
     return static_cast<int32_t>(now - target) >= 0;
 }
 
+bool useAddressedDutyPath()
+{
+    return (gDeviceCount == 1u && AppConfig::kControlledAddress == 0u);
+}
+
+int16_t filteredDutyCommand()
+{
+    int16_t duty = gController.dutyCommand();
+
+    if (duty > -AppConfig::kDutyDeadband && duty < AppConfig::kDutyDeadband) {
+        duty = 0;
+    }
+
+    return duty;
+}
+
+int16_t slewLimitedDutyCommand(int16_t targetDuty)
+{
+    const int16_t step = AppConfig::kDutySlewPerCommand;
+
+    if (targetDuty > gAppliedDutyCommand + step) {
+        return static_cast<int16_t>(gAppliedDutyCommand + step);
+    }
+
+    if (targetDuty < gAppliedDutyCommand - step) {
+        return static_cast<int16_t>(gAppliedDutyCommand - step);
+    }
+
+    return targetDuty;
+}
+
 void clearDutyArray()
 {
     memset(gDuties, 0, sizeof(gDuties));
+}
+
+void applyRingTraceSetting()
+{
+    gRing.setTraceStream(gRingTraceEnabled ? &Serial : nullptr);
 }
 
 void printBanner()
@@ -69,9 +109,11 @@ void printHelp()
     Serial.println("  zero");
     Serial.println("  dir <1|-1>");
     Serial.println("  gains <kp> <kd>");
+    Serial.println("  ki <gain>");
     Serial.println("  maxduty <0..1200>");
     Serial.println("  torque <mA>");
     Serial.println("  stream <0|1>");
+    Serial.println("  trace <0|1>");
 }
 
 void printEncoderStatus()
@@ -115,12 +157,16 @@ void printRingStatus()
 
     Serial.print("kp=");
     Serial.print(gController.kp(), 4);
+    Serial.print(" ki=");
+    Serial.print(gController.ki(), 4);
     Serial.print(" kd=");
     Serial.print(gController.kd(), 4);
     Serial.print(" maxduty=");
     Serial.print(gController.maxDuty());
     Serial.print(" dir=");
-    Serial.println(gController.direction());
+    Serial.print(gController.direction());
+    Serial.print(" trace=");
+    Serial.println(gRingTraceEnabled ? 1 : 0);
 }
 
 void printTelemetry()
@@ -207,18 +253,31 @@ bool applyTorqueLimit()
     return true;
 }
 
-void sendZeroDuty()
+bool sendZeroDuty()
 {
     clearDutyArray();
+    gAppliedDutyCommand = 0;
 
     if (!gRingReady || gDeviceCount == 0) {
-        return;
+        return true;
+    }
+
+    if (useAddressedDutyPath()) {
+        if (!gRing.setDuty(AppConfig::kControlledAddress, 0, &gLastStatus)) {
+            Serial.print("zero-duty setDuty failed: ");
+            Serial.println(gRing.lastErrorString());
+            return false;
+        }
+        return true;
     }
 
     if (!gRing.broadcastDuty(gDuties, gDeviceCount)) {
         Serial.print("zero-duty broadcast failed: ");
         Serial.println(gRing.lastErrorString());
+        return false;
     }
+
+    return true;
 }
 
 void disarmController(const char *reason)
@@ -226,6 +285,7 @@ void disarmController(const char *reason)
     if (gArmed) {
         gArmed = false;
         gTapActive = false;
+        gConsecutiveRingFailures = 0;
         sendZeroDuty();
         if (gRingReady) {
             gRing.stop(AppConfig::kControlledAddress, &gLastStatus);
@@ -254,10 +314,11 @@ void armController()
         return;
     }
 
-    if (!gRing.clearFault(AppConfig::kControlledAddress, &gLastStatus)) {
-        Serial.print("clearFault failed: ");
-        Serial.println(gRing.lastErrorString());
-        return;
+    if (gLastStatus.fault != 0u) {
+        if (!gRing.clearFault(AppConfig::kControlledAddress, &gLastStatus)) {
+            Serial.print("clearFault failed (continuing): ");
+            Serial.println(gRing.lastErrorString());
+        }
     }
 
     if (!applyTorqueLimit()) {
@@ -265,7 +326,11 @@ void armController()
     }
 
     gController.setTargetDegrees(gHomeTargetDeg);
-    sendZeroDuty();
+    if (!sendZeroDuty()) {
+        return;
+    }
+    gConsecutiveRingFailures = 0;
+    gNextCommandAtUs = micros();
     gArmed = true;
     Serial.println("armed");
 }
@@ -310,14 +375,49 @@ void runControlTick()
         return;
     }
 
-    clearDutyArray();
-    gDuties[AppConfig::kControlledAddress] = gController.dutyCommand();
+    if (useAddressedDutyPath()) {
+        const uint32_t nowUs = micros();
+        const int16_t duty = slewLimitedDutyCommand(filteredDutyCommand());
 
-    if (!gRing.broadcastDuty(gDuties, gDeviceCount)) {
-        disarmController("broadcast duty failed");
+        if (!timeReached(nowUs, gNextCommandAtUs)) {
+            return;
+        }
+
+        gNextCommandAtUs = nowUs + AppConfig::kCommandPeriodUs;
+
+        if (!gRing.setDuty(AppConfig::kControlledAddress, duty, &gLastStatus)) {
+            gConsecutiveRingFailures++;
+            Serial.print("setDuty failed: ");
+            Serial.println(gRing.lastErrorString());
+            if (gConsecutiveRingFailures >= AppConfig::kMaxConsecutiveCommFailures) {
+                disarmController("set duty failed");
+            }
+            return;
+        }
+
+        gConsecutiveRingFailures = 0;
+        gAppliedDutyCommand = duty;
+
+        if (gLastStatus.fault != 0u) {
+            disarmController("motor fault");
+        }
         return;
     }
 
+    clearDutyArray();
+    gDuties[AppConfig::kControlledAddress] = filteredDutyCommand();
+
+    if (!gRing.broadcastDuty(gDuties, gDeviceCount)) {
+        gConsecutiveRingFailures++;
+        Serial.print("broadcastDuty failed: ");
+        Serial.println(gRing.lastErrorString());
+        if (gConsecutiveRingFailures >= AppConfig::kMaxConsecutiveCommFailures) {
+            disarmController("broadcast duty failed");
+        }
+        return;
+    }
+
+    gConsecutiveRingFailures = 0;
     maybePollStatus();
 }
 
@@ -452,8 +552,23 @@ void handleLine(char *line)
         gController.setGains(strtof(kpArg, nullptr), strtof(kdArg, nullptr));
         Serial.print("kp=");
         Serial.print(gController.kp(), 4);
+        Serial.print(" ki=");
+        Serial.print(gController.ki(), 4);
         Serial.print(" kd=");
         Serial.println(gController.kd(), 4);
+        return;
+    }
+
+    if (strcmp(command, "ki") == 0) {
+        char *arg = strtok_r(nullptr, " \t", &context);
+        if (!arg) {
+            Serial.println("usage: ki <gain>");
+            return;
+        }
+
+        gController.setIntegralGain(strtof(arg, nullptr));
+        Serial.print("ki=");
+        Serial.println(gController.ki(), 4);
         return;
     }
 
@@ -500,6 +615,20 @@ void handleLine(char *line)
         return;
     }
 
+    if (strcmp(command, "trace") == 0) {
+        char *arg = strtok_r(nullptr, " \t", &context);
+        if (!arg) {
+            Serial.println("usage: trace <0|1>");
+            return;
+        }
+
+        gRingTraceEnabled = (strtol(arg, nullptr, 10) != 0);
+        applyRingTraceSetting();
+        Serial.print("trace=");
+        Serial.println(gRingTraceEnabled ? 1 : 0);
+        return;
+    }
+
     Serial.print("unknown command: ");
     Serial.println(command);
 }
@@ -536,18 +665,23 @@ void setup()
 {
     clearDutyArray();
     memset(&gLastStatus, 0, sizeof(gLastStatus));
-
+    //pinMode(10, OUTPUT);
+    //digitalWrite(10, HIGH);
     Serial.begin(AppConfig::kUsbBaud);
+    while(!Serial);
+    Serial.println("mallet servo demo");
     delay(500);
 
-    Serial1.setTX(AppConfig::kRingTxPin);
-    Serial1.setRX(AppConfig::kRingRxPin);
-    Serial1.begin(AppConfig::kRingBaud);
-
+    //Serial1.setTX(AppConfig::kRingTxPin);
+    //Serial1.setRX(AppConfig::kRingRxPin);
+    //Serial1.begin(AppConfig::kRingBaud);
+    target_uart.begin(AppConfig::kRingBaud);
     gRing.setTimeoutMs(20);
+    applyRingTraceSetting();
     gEncoders.begin(AppConfig::kEncoderCount);
 
     gController.setGains(AppConfig::kDefaultKp, AppConfig::kDefaultKd);
+    gController.setIntegralGain(AppConfig::kDefaultKi);
     gController.setMaxDuty(AppConfig::kDefaultMaxDuty);
     gController.setVelocityAlpha(AppConfig::kDefaultVelocityAlpha);
     gController.setTargetDegrees(gHomeTargetDeg);
@@ -556,6 +690,7 @@ void setup()
     enumerateRing(true);
 
     gNextControlAtUs = micros() + AppConfig::kControlPeriodUs;
+    gNextCommandAtUs = micros();
 
     printBanner();
 }
