@@ -83,11 +83,13 @@ class BL4818RingClient:
         baudrate: int = 250000,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
         open_settle_ms: int = DEFAULT_OPEN_SETTLE_MS,
+        trace: bool = False,
     ):
         self.port = port
         self.baudrate = baudrate
         self.timeout_ms = timeout_ms
         self.open_settle_ms = open_settle_ms
+        self.trace = trace
         self.ser: Optional[serial.Serial] = None
         self.device_count: Optional[int] = None
 
@@ -110,7 +112,20 @@ class BL4818RingClient:
     def clear_input(self) -> None:
         if not self.ser:
             return
-        self.ser.reset_input_buffer()
+
+        dropped = bytearray()
+        while True:
+            waiting = self.ser.in_waiting
+            if waiting <= 0:
+                break
+            chunk = self.ser.read(waiting)
+            if not chunk:
+                break
+            dropped.extend(chunk)
+            time.sleep(0.001)
+
+        if dropped:
+            self._trace_bytes("drop", bytes(dropped))
 
     def enumerate(self) -> int:
         packet = bytes((SYNC_ENUMERATE, 0x00))
@@ -181,6 +196,8 @@ class BL4818RingClient:
         if written != len(packet):
             raise RingError(f"short write: wrote {written} of {len(packet)} bytes")
 
+        self.ser.flush()
+        self._trace_bytes("tx", packet)
         return self._read_valid_frame(response_len, validator)
 
     def _read_valid_frame(self, length: int, validator) -> bytes:
@@ -199,16 +216,23 @@ class BL4818RingClient:
                 while len(received) >= length:
                     candidate = bytes(received[:length])
                     if validator(candidate):
+                        self._trace_bytes("rx", candidate)
                         return candidate
                     del received[0]
                 continue
 
             if time.monotonic() - last_byte_at >= timeout_s:
+                self._trace_bytes("rx-timeout", bytes(received))
                 raise RingTimeout(
                     f"timeout waiting for valid {length}-byte frame (buffer={received.hex(' ')})"
                 )
 
             time.sleep(0.001)
+
+    def _trace_bytes(self, label: str, data: bytes) -> None:
+        if not self.trace:
+            return
+        print(f"ring {label}: {data.hex(' ').upper()}")
 
     @staticmethod
     def _pack_i16(value: int) -> bytes:
@@ -366,6 +390,7 @@ def run_probe(port: str, timeout_ms: int, baud_list: list[int], open_settle_ms: 
             baudrate=baud,
             timeout_ms=timeout_ms,
             open_settle_ms=open_settle_ms,
+            trace=False,
         )
         try:
             client.open()
@@ -400,6 +425,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_OPEN_SETTLE_MS,
         help=f"Delay after opening the port before first I/O (default: {DEFAULT_OPEN_SETTLE_MS})",
     )
+    parser.add_argument("--trace", action="store_true", help="Print raw TX/RX bytes for each transaction")
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -495,6 +521,7 @@ def main() -> int:
         baudrate=args.baud,
         timeout_ms=args.timeout_ms,
         open_settle_ms=args.open_settle_ms,
+        trace=args.trace,
     )
 
     try:
