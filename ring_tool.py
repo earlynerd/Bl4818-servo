@@ -290,7 +290,7 @@ class BL4818RingClient:
 
     @staticmethod
     def _validate_fixed_response(frame: bytes, prefix: bytes) -> bool:
-        if len(frame) != len(prefix) + 1:
+        if len(frame) < len(prefix) + 1:
             return False
         if frame[: len(prefix)] != prefix:
             return False
