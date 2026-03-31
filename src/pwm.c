@@ -192,10 +192,15 @@ void pwm_set_duty(uint16_t duty)
     PWM2L = (uint8_t)(inv & 0xFF);
 
     /* Phase W: CH4 (low-side primary) — direct, page 1 */
-    SFR_PAGE1();
-    PWM4H = (uint8_t)(duty >> 8);
-    PWM4L = (uint8_t)(duty & 0xFF);
-    SFR_PAGE0();
+    {
+        uint8_t saved_ea = EA;
+        EA = 0;
+        SFR_PAGE1();
+        PWM4H = (uint8_t)(duty >> 8);
+        PWM4L = (uint8_t)(duty & 0xFF);
+        SFR_PAGE0();
+        EA = saved_ea;
+    }
 
     /* Trigger buffered load — takes effect at next PWM period boundary */
     LOAD = 1;

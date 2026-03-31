@@ -132,7 +132,6 @@ static void send_broadcast_tx(void)
         uart_putc(rx_broadcast_tx[i]);
 
     uart_putc(broadcast_tx_crc());
-    uart_tx_flush();
 }
 
 static void send_status_binary(void)
@@ -156,7 +155,6 @@ static void send_status_binary(void)
     crc = crc8_update(crc, hall);
     uart_putc(hall);
     uart_putc(crc);
-    uart_tx_flush();
 }
 
 static void send_status_binary_with_state(uint8_t state)
@@ -179,7 +177,6 @@ static void send_status_binary_with_state(uint8_t state)
     crc = crc8_update(crc, hall);
     uart_putc(hall);
     uart_putc(crc);
-    uart_tx_flush();
 }
 
 static uint8_t command_payload_len(uint8_t cmd)
