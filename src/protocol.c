@@ -294,8 +294,10 @@ void protocol_tick_1khz(void)
     /* Stop motor if host goes silent after enumeration */
     if (device_addr != PROTO_ADDR_UNASSIGNED && host_comms_countdown != 0u) {
         host_comms_countdown--;
-        if (host_comms_countdown == 0u)
-            motor_stop();
+        if (host_comms_countdown == 0u) {
+            if (motor_get_state() == MOTOR_RUN)
+                motor_stop();
+        }
     }
 #endif
 }
@@ -322,6 +324,12 @@ void protocol_poll(void)
         switch (rx_state) {
         case PROTO_RX_IDLE:
             if (c == PROTO_SYNC_ENUM) {
+                if (device_addr != PROTO_ADDR_UNASSIGNED) {
+                    /* Already enumerated — ignore the sync byte so it
+                     * cannot consume the start of the next real packet.
+                     * Re-enumerate requires a power cycle. */
+                    break;
+                }
                 rx_crc = crc8_update(PROTO_CRC8_INIT, c);
                 rx_state = PROTO_RX_ENUM_COUNTER;
                 protocol_restart_timeout();
@@ -367,7 +375,8 @@ void protocol_poll(void)
                 uint8_t next = (uint8_t)(rx_payload[0] + 1u);
                 uint8_t forward_crc = PROTO_CRC8_INIT;
 
-                device_addr = rx_payload[0];
+                if (device_addr == PROTO_ADDR_UNASSIGNED)
+                    device_addr = rx_payload[0];
                 uart_putc(PROTO_SYNC_ENUM);
                 uart_putc(next);
                 forward_crc = crc8_update(forward_crc, PROTO_SYNC_ENUM);
