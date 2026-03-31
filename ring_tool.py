@@ -45,7 +45,7 @@ CMD_QUERY_STATUS = 0x10
 MAX_DEVICES = 16
 STATUS_FRAME_SIZE = 7
 DEFAULT_TIMEOUT_MS = 100
-DEFAULT_OPEN_SETTLE_MS = 80
+DEFAULT_OPEN_SETTLE_MS = 250
 
 
 def crc8(data: bytes) -> int:
@@ -92,6 +92,7 @@ class BL4818RingClient:
         self.trace = trace
         self.ser: Optional[serial.Serial] = None
         self.device_count: Optional[int] = None
+        self.link_primed = False
 
     def open(self) -> None:
         self.ser = serial.Serial(
@@ -102,6 +103,7 @@ class BL4818RingClient:
         )
         if self.open_settle_ms > 0:
             time.sleep(self.open_settle_ms / 1000.0)
+        self.link_primed = False
         self.clear_input()
 
     def close(self) -> None:
@@ -190,15 +192,27 @@ class BL4818RingClient:
         if not self.ser:
             raise RingError("serial port is not open")
 
-        self.clear_input()
+        for attempt in range(2):
+            self.clear_input()
 
-        written = self.ser.write(packet)
-        if written != len(packet):
-            raise RingError(f"short write: wrote {written} of {len(packet)} bytes")
+            written = self.ser.write(packet)
+            if written != len(packet):
+                raise RingError(f"short write: wrote {written} of {len(packet)} bytes")
 
-        self.ser.flush()
-        self._trace_bytes("tx", packet)
-        return self._read_valid_frame(response_len, validator)
+            self.ser.flush()
+            self._trace_bytes("tx", packet)
+
+            try:
+                response = self._read_valid_frame(response_len, validator)
+                self.link_primed = True
+                return response
+            except RingTimeout:
+                if self.link_primed or attempt > 0:
+                    raise
+                self._trace_note("retry", "first transaction after open")
+                time.sleep(0.02)
+
+        raise RingTimeout("timeout waiting for response after startup retry")
 
     def _read_valid_frame(self, length: int, validator) -> bytes:
         assert self.ser is not None
@@ -232,7 +246,15 @@ class BL4818RingClient:
     def _trace_bytes(self, label: str, data: bytes) -> None:
         if not self.trace:
             return
-        print(f"ring {label}: {data.hex(' ').upper()}")
+        if data:
+            print(f"ring {label}: {data.hex(' ').upper()}")
+        else:
+            print(f"ring {label}:")
+
+    def _trace_note(self, label: str, note: str) -> None:
+        if not self.trace:
+            return
+        print(f"ring {label}: {note}")
 
     @staticmethod
     def _pack_i16(value: int) -> bytes:
@@ -380,7 +402,13 @@ def parse_baud_list(spec: str) -> list[int]:
     return baud_list
 
 
-def run_probe(port: str, timeout_ms: int, baud_list: list[int], open_settle_ms: int) -> int:
+def run_probe(
+    port: str,
+    timeout_ms: int,
+    baud_list: list[int],
+    open_settle_ms: int,
+    trace: bool,
+) -> int:
     print(f"probing port={port} bauds={','.join(str(v) for v in baud_list)}")
     any_success = False
 
@@ -390,7 +418,7 @@ def run_probe(port: str, timeout_ms: int, baud_list: list[int], open_settle_ms: 
             baudrate=baud,
             timeout_ms=timeout_ms,
             open_settle_ms=open_settle_ms,
-            trace=False,
+            trace=trace,
         )
         try:
             client.open()
@@ -511,7 +539,13 @@ def main() -> int:
 
     if args.command == "probe":
         try:
-            return run_probe(port, args.timeout_ms, parse_baud_list(args.bauds), args.open_settle_ms)
+            return run_probe(
+                port,
+                args.timeout_ms,
+                parse_baud_list(args.bauds),
+                args.open_settle_ms,
+                args.trace,
+            )
         except RingError as exc:
             print(f"ERROR: {exc}")
             return 1
