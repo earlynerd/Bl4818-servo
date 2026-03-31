@@ -46,6 +46,7 @@ MAX_DEVICES = 16
 STATUS_FRAME_SIZE = 7
 DEFAULT_TIMEOUT_MS = 100
 DEFAULT_OPEN_SETTLE_MS = 250
+DEFAULT_READ_SLICE_MS = 10
 
 
 def crc8(data: bytes) -> int:
@@ -98,9 +99,15 @@ class BL4818RingClient:
         self.ser = serial.Serial(
             self.port,
             self.baudrate,
-            timeout=0,
+            timeout=max(min(self.timeout_ms / 1000.0, DEFAULT_READ_SLICE_MS / 1000.0), 0.001),
+            inter_byte_timeout=DEFAULT_READ_SLICE_MS / 1000.0,
+            xonxoff=False,
+            rtscts=False,
+            dsrdtr=False,
             write_timeout=max(self.timeout_ms / 1000.0, 0.1),
         )
+        self.ser.setRTS(False)
+        self.ser.setDTR(True)
         if self.open_settle_ms > 0:
             time.sleep(self.open_settle_ms / 1000.0)
         self.link_primed = False
@@ -218,12 +225,14 @@ class BL4818RingClient:
         assert self.ser is not None
 
         received = bytearray()
+        observed = bytearray()
         last_byte_at = time.monotonic()
         timeout_s = self.timeout_ms / 1000.0
 
         while True:
             chunk = self.ser.read(max(length, 1))
             if chunk:
+                observed.extend(chunk)
                 received.extend(chunk)
                 last_byte_at = time.monotonic()
 
@@ -232,13 +241,16 @@ class BL4818RingClient:
                     if validator(candidate):
                         self._trace_bytes("rx", candidate)
                         return candidate
+                    self._trace_bytes("rx-bad", candidate)
                     del received[0]
                 continue
 
             if time.monotonic() - last_byte_at >= timeout_s:
+                self._trace_bytes("rx-seen", bytes(observed))
                 self._trace_bytes("rx-timeout", bytes(received))
                 raise RingTimeout(
-                    f"timeout waiting for valid {length}-byte frame (buffer={received.hex(' ')})"
+                    "timeout waiting for valid "
+                    f"{length}-byte frame (tail={received.hex(' ')} seen={observed.hex(' ')})"
                 )
 
             time.sleep(0.001)
