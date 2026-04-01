@@ -5,7 +5,7 @@ This document describes the UART protocol implemented by the firmware in
 
 Default line settings:
 
-- `250000` baud
+- `115200` baud
 - `8N1`
 - UART1 on the programming header pads: `P = TX`, `S = RX`
 
@@ -42,16 +42,18 @@ and gate-drive probing.
 
 | First byte | Meaning | Device behavior |
 |---|---|---|
+| `0x7D` | Diagnostic response | Always forward unchanged after CRC validation |
 | `0x7F` | Enumerate | Claim current counter as address, increment, forward |
 | `0xFF` | Broadcast duty | Consume first duty slot, decrement slot count, forward remaining slots |
 | `0x80`-`0x8F` | Addressed command | If address matches me: swallow, execute, reply with status |
-| `0x7E` | Status response | Always forward unchanged |
+| `0x7E` | Status response | Always forward unchanged after CRC validation |
 
 The current implementation supports addressed device IDs `0..15`.
 
 All production frames end with a CRC-8 byte. The CRC uses polynomial `0x07`,
-initial value `0x00`, no reflection, and no final XOR. Devices ignore bad
-enumeration, addressed, or broadcast frames rather than acting on them.
+initial value `0x00`, no reflection, and no final XOR. Bad frames are dropped,
+the current parse is aborted, and queued RX bytes are flushed so the next clean
+transaction can recover deterministically.
 
 ## Enumeration
 
@@ -139,6 +141,7 @@ Supported commands:
 | `0x03` | none | Stop / coast |
 | `0x04` | none | Clear fault |
 | `0x10` | none | Query status |
+| `0x11` | none | Query transport diagnostics |
 
 Payload integers are big-endian.
 
@@ -175,6 +178,29 @@ That means:
 - `fault = 0`
 - `current = 0x01F4 = 500 mA`
 - `hall = 3`
+
+## Diagnostic Response
+
+Format:
+
+```text
+[0x7D] [flags] [last_abort] [bad_crc_hi] [bad_crc_lo]
+       [timeout_hi] [timeout_lo] [overflow_hi] [overflow_lo]
+       [frame_abort_hi] [frame_abort_lo] [false_sync_hi] [false_sync_lo]
+       [addr_fwd_hi] [addr_fwd_lo] [crc]
+```
+
+Fields:
+
+- `flags bit0`: node is enumerated
+- `flags bit1`: last reset was caused by watchdog
+- `last_abort`: most recent parser abort reason code
+- `bad_crc`: count of CRC failures seen by the parser or forwarded-frame validator
+- `timeout_abort`: count of frame timeouts
+- `overflow`: count of UART RX overflows
+- `frame_abort`: total parser abort count
+- `false_sync`: count of bad forwarded `0x7D`/`0x7E` frames
+- `addr_fwd`: count of valid non-local addressed frames forwarded onward
 
 ## Recommended Master Loop
 

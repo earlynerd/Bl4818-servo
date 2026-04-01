@@ -9,7 +9,7 @@
  *   Timer 1 — 1 kHz tick for control loop timing
  *   Timer 2 — Free-running capture counter for hall timing and local PWM input
  *   Timer 3 — UART baud rate generator
- *   UART1   — Binary ring serial interface (250000 baud, on prog header)
+ *   UART1   — Binary ring serial interface (115200 baud, on prog header)
  *   ADC     — Current sensing (polled in control loop)
  *   GPIO    — Hall sensors (polled)
  */
@@ -32,8 +32,10 @@ static void timer1_init(void);
 static void timer2_init(void);
 static void wdt_init(void);
 static void wdt_feed(void);
-static void wdt_write(uint8_t value);
+static void ta_write_rctrim1(uint8_t value);
+static void ta_write_wdcon(uint8_t value);
 static void wdt_set_bits(uint8_t mask);
+static void wdt_clear_bits(uint8_t mask);
 uint8_t wdt_reset_detected(void);
 static void tach_init(void);
 static void tach_debug_tick(void);
@@ -146,16 +148,18 @@ static void sys_init(void)
 
 static void clock_init(void)
 {
+    uint8_t r1;
+
     /* Select the 24 MHz HIRC bank before applying any trim offset. */
-    TIMED_ACCESS();
-    RCTRIM1 |= 0x10u;
+    r1 = (uint8_t)(RCTRIM1 | 0x10u);
+    ta_write_rctrim1(r1);
 
 #if HIRC_TRIM_OFFSET != 0
     /*
      * Adjust RCTRIM0 directly — avoids 9-bit encode/decode assumptions.
      *
-     * CRITICAL: TIMED_ACCESS only holds the TA window open for 3 instructions.
-     * Pre-compute the value BEFORE the TA unlock.
+     * Pre-compute the value BEFORE the TA unlock so the protected write itself
+     * is a single direct assignment inside the TA write window.
      */
     {
         uint8_t r0 = (uint8_t)(RCTRIM0 + (int8_t)HIRC_TRIM_OFFSET);
@@ -167,6 +171,26 @@ static void clock_init(void)
     TIMED_ACCESS();
     CKSWT = 0x00;
     CKDIV = 0x00;
+}
+
+static void ta_write_rctrim1(uint8_t value)
+{
+    uint8_t saved_ea = EA;
+
+    EA = 0;
+    TIMED_ACCESS();
+    RCTRIM1 = value;
+    EA = saved_ea;
+}
+
+static void ta_write_wdcon(uint8_t value)
+{
+    uint8_t saved_ea = EA;
+
+    EA = 0;
+    TIMED_ACCESS();
+    WDCON = value;
+    EA = saved_ea;
 }
 
 static void timer1_init(void)
@@ -196,24 +220,16 @@ static void timer2_init(void)
     T2CON |= 0x04;  /* TR2 = 1 */
 }
 
-static void wdt_write(uint8_t value)
-{
-    uint8_t saved_ea = EA;
-
-    EA = 0;
-    TIMED_ACCESS();
-    WDCON = value;
-    EA = saved_ea;
-}
-
 static void wdt_set_bits(uint8_t mask)
 {
-    uint8_t saved_ea = EA;
+    uint8_t value = (uint8_t)(WDCON | mask);
+    ta_write_wdcon(value);
+}
 
-    EA = 0;
-    TIMED_ACCESS();
-    WDCON |= mask;
-    EA = saved_ea;
+static void wdt_clear_bits(uint8_t mask)
+{
+    uint8_t value = (uint8_t)(WDCON & (uint8_t)~mask);
+    ta_write_wdcon(value);
 }
 
 static uint8_t wdt_reset_occurred;
@@ -224,8 +240,13 @@ static void wdt_init(void)
     /* Check if the MCU was reset by the WDT before we clear anything */
     wdt_reset_occurred = (WDCON & WDCON_WDTRF) ? 1u : 0u;
 
-    /* Enable WDT (this also clears WDTRF via the full register write) */
-    wdt_write((uint8_t)(WDCON_WDTEN | (WDT_PRESCALER_BITS & WDCON_WPS_MASK)));
+    /*
+     * Follow the documented WDCON ceremony literally:
+     * clear sticky flags, clear WDPS, set WDPS, then feed with WDCLR.
+     * Avoid full-register writes because WDCON contains side-effect bits.
+     */
+    wdt_clear_bits((uint8_t)(WDCON_WDTF | WDCON_WDTRF | WDCON_WDPS_MASK));
+    wdt_set_bits((uint8_t)(WDT_PRESCALER_BITS & WDCON_WDPS_MASK));
     wdt_feed();
 #else
     wdt_reset_occurred = 0;

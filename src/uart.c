@@ -77,7 +77,7 @@ void uart_init(uint32_t baudrate)
      * We keep the same reload math:
      *   baud ~= FSYS / (16 * (65536 - reload))
      *
-     * For 250000 @ 24MHz nominal: reload = 65530 = 0xFFFA.
+     * For 115200 @ 24MHz nominal: reload = 65523 = 0xFFF3.
      */
     uint16_t reload = (uint16_t)(65536UL - ((FSYS / 16UL + baudrate / 2) / baudrate));
 
@@ -113,8 +113,8 @@ void uart_init(uint32_t baudrate)
     SCON_1 = 0x50;
     TI_1 = 1;
 
-    /* Timer 3: SMOD_1=1 (double baud), TR3=1, prescale=1 */
-    T3CON = 0x88;
+    /* Timer 3: vendor UART1 setup uses TR3=1, prescale=1, BRCK=0. */
+    T3CON = 0x08;
     RH3 = (uint8_t)(reload >> 8);
     RL3 = (uint8_t)(reload & 0xFF);
 

@@ -147,7 +147,7 @@
 /* UART1 pins (on programming header — alternative serial port) */
 #define UART1_TX_PIN    P16     /* P1.6 pin 8  - UART1_TXD / prog "P" */
 #define UART1_RX_PIN    P02     /* P0.2 pin 18 - UART1_RXD / prog "S" */
-#define UART_BAUD       250000UL
+#define UART_BAUD       115200UL
 
 /*
  * GPIO electrical policy for this board:
@@ -222,34 +222,34 @@
 
 /* ── Timing ──────────────────────────────────────────────────────────────── */
 #define CONTROL_LOOP_HZ     1000    /* 1 kHz control loop */
-#define FEATURE_WATCHDOG    1U      /* Reset if the main loop stops reaching the control tick */
-#define WDT_PRESCALER_BITS  7U      /* Longest watchdog interval */
+#define FEATURE_WATCHDOG    1U      /* Enable watchdog support */
+#define WDT_PRESCALER_BITS  7U      /* Longest documented watchdog interval: ~1.638 s */
 
 #if WDT_PRESCALER_BITS > 7U
 #error "WDT_PRESCALER_BITS must be in the range 0..7."
 #endif
 
 /* ── Legacy Local Inputs ─────────────────────────────────────────────────── */
-#define FEATURE_LOCAL_PWM_INPUT    1       /* PWM+DIR active until serial enumeration */
+#define FEATURE_LOCAL_PWM_INPUT    1       /* Enable local PWM/DIR input control */
 #define LOCAL_PWM_ACTIVE_LOW       1U      /* Pull-up on P0.4: idle/high = zero torque */
 #define LOCAL_PWM_DC_FULLSCALE_MS  20U     /* Continuous active level -> full local command */
-#define LOCAL_PWM_RAMP_UP_MS       100U    /* Local command rises from 0 to full over this time */
+#define LOCAL_PWM_RAMP_UP_MS       250U    /* Local command rises from 0 to full over this time */
 #define LOCAL_DIR_REVERSAL_COAST_MS 150U   /* Coast this long before allowing local reverse torque */
 #define LOCAL_FAULT_RETRY_DELAY_MS 250U    /* Wait before each local auto-retry */
-#define LOCAL_FAULT_RETRY_MAX      3U      /* Retries per nonzero local command episode */
-#define LOCAL_PWM_TIMEOUT_MS       50U     /* Stop if PWM edges disappear */
-#define LOCAL_PWM_MIN_DUTY_COUNTS  4U      /* Treat near-zero input as stop */
+#define LOCAL_FAULT_RETRY_MAX      5U      /* Retries per nonzero local command episode */
+#define LOCAL_PWM_TIMEOUT_MS       250U     /* Stop if PWM edges disappear */
+#define LOCAL_PWM_MIN_DUTY_COUNTS  2U      /* Treat near-zero input as stop */
 #define LOCAL_PWM_DIR_INVERT       0U      /* 0: DIR high = forward */
 
 /* ── Host Communication Timeout ──────────────────────────────────────────── */
 /* Stop motor if no valid command arrives within this many milliseconds.
  * Only active once the device has been enumerated on the ring bus.
  * Set to 0 to disable. */
-#define HOST_COMMS_TIMEOUT_MS   250u
+#define HOST_COMMS_TIMEOUT_MS   0u
 
 /* ── Feature Toggles ─────────────────────────────────────────────────────── */
 #define FEATURE_UART        1       /* Enable UART command interface */
-#define FEATURE_TACH_DEBUG  1       /* Toggle tach pin from control-loop timing */
+#define FEATURE_TACH_DEBUG  0       /* Toggle tach pin from control-loop timing */
 #define TACH_DEBUG_DIVIDER  1U      /* Square wave = CONTROL_LOOP_HZ / (2 * divider) */
 
 #endif /* MS51_CONFIG_H */

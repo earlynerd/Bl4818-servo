@@ -187,8 +187,10 @@ Notes:
 - `--config-bytes` is for one-off raw 5-byte writes
 - `--bod-threshold`, `--bod`, `--bor-reset`, `--boiap`, and `--wdt-config`
   can override a selected profile at write time
-- The firmware still enables the watchdog at runtime in `src/main.c`; `CONFIG4`
-  only controls the reset-time default mode
+- `CONFIG4[7:4]` decides whether WDT is a timeout-reset watchdog or a
+  software-controlled general-purpose timer. The firmware in `src/main.c` only
+  services the watchdog and adjusts `WDPS`; it does not switch GP-timer mode
+  into reset mode at runtime.
 
 When the Pico bridge is idle, its secondary USB CDC "debug" port now passes
 through the target MCU UART on the programming header pins. As soon as the host
@@ -240,7 +242,7 @@ python flash.py --recover --power-off-ms 100 \
 
 ## Serial Protocol
 
-Default: 250000 baud, 8N1 on UART1.
+Default: 115200 baud, 8N1 on UART1.
 
 The production firmware now uses a binary ring protocol only:
 

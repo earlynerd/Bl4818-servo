@@ -6,7 +6,7 @@ BL4818RingMaster ring(Serial1);
 
 constexpr uint8_t kRingTxPin = 4;
 constexpr uint8_t kRingRxPin = 5;
-constexpr uint32_t kRingBaud = 250000;
+constexpr uint32_t kRingBaud = 115200;
 
 constexpr uint32_t kControlPeriodMs = 2;
 constexpr uint16_t kTorqueLimitMa = 2500;

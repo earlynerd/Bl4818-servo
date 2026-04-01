@@ -27,6 +27,7 @@
 #include "motor.h"
 #include "hall.h"
 
+#define PROTO_SYNC_DIAG           0x7Du
 #define PROTO_SYNC_STATUS         0x7Eu
 #define PROTO_SYNC_ENUM           0x7Fu
 #define PROTO_SYNC_ADDR_BASE      0x80u
@@ -44,18 +45,41 @@
 #define PROTO_CMD_STOP            0x03u
 #define PROTO_CMD_CLEAR_FAULT     0x04u
 #define PROTO_CMD_QUERY_STATUS    0x10u
+#define PROTO_CMD_QUERY_DIAG      0x11u
 
 #define PROTO_STATUS_DATA_SIZE    5u
-#define PROTO_STATUS_TAIL_SIZE    (PROTO_STATUS_DATA_SIZE + 1u)
+#define PROTO_STATUS_FRAME_SIZE   (1u + PROTO_STATUS_DATA_SIZE + 1u)
+#define PROTO_DIAG_COUNTER_COUNT  6u
+#define PROTO_DIAG_DATA_SIZE      (2u + (2u * PROTO_DIAG_COUNTER_COUNT))
+#define PROTO_DIAG_FRAME_SIZE     (1u + PROTO_DIAG_DATA_SIZE + 1u)
+#define PROTO_POLL_BYTE_BUDGET    32u
+#define PROTO_ADDR_FRAME_MAX      5u
 #define PROTO_BROADCAST_FRAME_MAX (2u + (2u * PROTO_MAX_ADDRESSED_DEV) + 1u)
+
+#define PROTO_DIAG_FLAG_ENUMERATED  0x01u
+#define PROTO_DIAG_FLAG_WDT_RESET   0x02u
+
+#define PROTO_ABORT_NONE             0u
+#define PROTO_ABORT_TIMEOUT          1u
+#define PROTO_ABORT_RX_OVERFLOW      2u
+#define PROTO_ABORT_ENUM_BAD_CRC     3u
+#define PROTO_ABORT_ADDR_BAD_CRC     4u
+#define PROTO_ABORT_BROADCAST_COUNT  5u
+#define PROTO_ABORT_BROADCAST_BAD_CRC 6u
+#define PROTO_ABORT_STATUS_BAD_CRC   7u
+#define PROTO_ABORT_DIAG_BAD_CRC     8u
+#define PROTO_ABORT_PARSER_DEFAULT   9u
 
 typedef enum {
     PROTO_RX_IDLE = 0,
+    PROTO_RX_ENUM_IGNORE_COUNTER,
+    PROTO_RX_ENUM_IGNORE_CRC,
     PROTO_RX_ENUM_COUNTER,
     PROTO_RX_ENUM_CRC,
     PROTO_RX_ADDR_CMD,
     PROTO_RX_ADDR_PAYLOAD,
     PROTO_RX_ADDR_CRC,
+    PROTO_RX_DIAG_FORWARD,
     PROTO_RX_STATUS_FORWARD,
     PROTO_RX_BROADCAST_COUNT,
     PROTO_RX_BROADCAST_DUTY_HI,
@@ -73,15 +97,35 @@ static uint8_t rx_payload_len;
 static uint8_t rx_payload_pos;
 static uint8_t rx_targeted;
 static uint8_t rx_crc;
+static uint8_t rx_addr_tx[PROTO_ADDR_FRAME_MAX];
+static uint8_t rx_diag_tx_pos;
+static uint8_t rx_status_tx_pos;
 static uint8_t rx_broadcast_consume;
 static uint8_t rx_broadcast_tx_pos;
 static uint8_t rx_timeout_ms;
 static uint16_t rx_forward_remaining;
+static uint16_t diag_bad_crc_count;
+static uint16_t diag_timeout_abort_count;
+static uint16_t diag_rx_overflow_count;
+static uint16_t diag_frame_abort_count;
+static uint16_t diag_false_sync_count;
+static uint16_t diag_addr_forward_count;
+static uint8_t diag_last_abort_reason;
+static uint8_t __xdata rx_diag_tx[PROTO_DIAG_FRAME_SIZE];
+static uint8_t __xdata rx_status_tx[PROTO_STATUS_FRAME_SIZE];
 static uint8_t __xdata rx_broadcast_tx[PROTO_BROADCAST_FRAME_MAX];
 
 #if HOST_COMMS_TIMEOUT_MS
 static uint16_t host_comms_countdown;
 #endif
+
+extern uint8_t wdt_reset_detected(void);
+
+static void diag_count_inc(uint16_t *value)
+{
+    if (*value != 0xFFFFu)
+        (*value)++;
+}
 
 static void protocol_restart_timeout(void)
 {
@@ -132,6 +176,58 @@ static void send_broadcast_tx(void)
         uart_putc(rx_broadcast_tx[i]);
 
     uart_putc(broadcast_tx_crc());
+}
+
+static void send_fixed_frame(const uint8_t *frame, uint8_t length)
+{
+    uint8_t i;
+
+    for (i = 0; i < length; i++)
+        uart_putc(frame[i]);
+}
+
+static void send_addressed_tx(uint8_t length)
+{
+    send_fixed_frame(rx_addr_tx, length);
+}
+
+static void send_diag_binary(void)
+{
+    uint8_t flags = 0u;
+    uint8_t crc = PROTO_CRC8_INIT;
+    uint16_t counters[PROTO_DIAG_COUNTER_COUNT];
+    uint8_t i;
+
+    if (device_addr != PROTO_ADDR_UNASSIGNED)
+        flags |= PROTO_DIAG_FLAG_ENUMERATED;
+    if (wdt_reset_detected())
+        flags |= PROTO_DIAG_FLAG_WDT_RESET;
+
+    counters[0] = diag_bad_crc_count;
+    counters[1] = diag_timeout_abort_count;
+    counters[2] = diag_rx_overflow_count;
+    counters[3] = diag_frame_abort_count;
+    counters[4] = diag_false_sync_count;
+    counters[5] = diag_addr_forward_count;
+
+    crc = crc8_update(crc, PROTO_SYNC_DIAG);
+    uart_putc(PROTO_SYNC_DIAG);
+    crc = crc8_update(crc, flags);
+    uart_putc(flags);
+    crc = crc8_update(crc, diag_last_abort_reason);
+    uart_putc(diag_last_abort_reason);
+
+    for (i = 0; i < PROTO_DIAG_COUNTER_COUNT; i++) {
+        uint8_t hi = (uint8_t)(counters[i] >> 8);
+        uint8_t lo = (uint8_t)(counters[i] & 0xFFu);
+
+        crc = crc8_update(crc, hi);
+        uart_putc(hi);
+        crc = crc8_update(crc, lo);
+        uart_putc(lo);
+    }
+
+    uart_putc(crc);
 }
 
 static void send_status_binary(void)
@@ -254,6 +350,9 @@ static void execute_addressed_command(void)
         motor_stop();
     } else if (rx_cmd == PROTO_CMD_CLEAR_FAULT) {
         motor_clear_fault();
+    } else if (rx_cmd == PROTO_CMD_QUERY_DIAG) {
+        send_diag_binary();
+        return;
     }
 
     send_status_binary();
@@ -266,15 +365,32 @@ static void protocol_reset(void)
     rx_payload_pos = 0;
     rx_targeted = 0;
     rx_crc = PROTO_CRC8_INIT;
+    rx_diag_tx_pos = 0;
+    rx_status_tx_pos = 0;
     rx_broadcast_consume = 0;
     rx_broadcast_tx_pos = 0;
     rx_timeout_ms = 0;
     rx_forward_remaining = 0;
 }
 
+static void protocol_abort_frame(uint8_t reason)
+{
+    diag_count_inc(&diag_frame_abort_count);
+    diag_last_abort_reason = reason;
+    uart_rx_flush();
+    protocol_reset();
+}
+
 void protocol_init(void)
 {
     device_addr = PROTO_ADDR_UNASSIGNED;
+    diag_bad_crc_count = 0;
+    diag_timeout_abort_count = 0;
+    diag_rx_overflow_count = 0;
+    diag_frame_abort_count = 0;
+    diag_false_sync_count = 0;
+    diag_addr_forward_count = 0;
+    diag_last_abort_reason = PROTO_ABORT_NONE;
     uart_rx_flush();
     protocol_reset();
 #if HOST_COMMS_TIMEOUT_MS
@@ -286,8 +402,10 @@ void protocol_tick_1khz(void)
 {
     if (rx_state != PROTO_RX_IDLE && rx_timeout_ms != 0u) {
         rx_timeout_ms--;
-        if (rx_timeout_ms == 0u)
-            protocol_reset();
+        if (rx_timeout_ms == 0u) {
+            diag_count_inc(&diag_timeout_abort_count);
+            protocol_abort_frame(PROTO_ABORT_TIMEOUT);
+        }
     }
 
 #if HOST_COMMS_TIMEOUT_MS
@@ -309,25 +427,39 @@ uint8_t protocol_is_enumerated(void)
 
 void protocol_poll(void)
 {
+    uint8_t budget = PROTO_POLL_BYTE_BUDGET;
+
     if (uart_rx_overflowed()) {
-        uart_rx_flush();
-        protocol_reset();
+        diag_count_inc(&diag_rx_overflow_count);
+        protocol_abort_frame(PROTO_ABORT_RX_OVERFLOW);
         return;
     }
 
-    while (uart_available()) {
+    while (budget != 0u && uart_available()) {
         uint8_t c = (uint8_t)uart_getc();
+        budget--;
 
         if (rx_state != PROTO_RX_IDLE)
             protocol_restart_timeout();
 
         switch (rx_state) {
         case PROTO_RX_IDLE:
+            if (c == PROTO_SYNC_DIAG) {
+                rx_diag_tx[0] = c;
+                rx_diag_tx_pos = 1u;
+                rx_state = PROTO_RX_DIAG_FORWARD;
+                protocol_restart_timeout();
+                break;
+            }
+
             if (c == PROTO_SYNC_ENUM) {
                 if (device_addr != PROTO_ADDR_UNASSIGNED) {
                     /* Already enumerated — ignore the sync byte so it
                      * cannot consume the start of the next real packet.
                      * Re-enumerate requires a power cycle. */
+                    /* Ignore the rest of the 3-byte enumerate frame. */
+                    rx_state = PROTO_RX_ENUM_IGNORE_COUNTER;
+                    protocol_restart_timeout();
                     break;
                 }
                 rx_crc = crc8_update(PROTO_CRC8_INIT, c);
@@ -337,8 +469,8 @@ void protocol_poll(void)
             }
 
             if (c == PROTO_SYNC_STATUS) {
-                uart_putc(c);
-                rx_forward_remaining = PROTO_STATUS_TAIL_SIZE;
+                rx_status_tx[0] = c;
+                rx_status_tx_pos = 1u;
                 rx_state = PROTO_RX_STATUS_FORWARD;
                 protocol_restart_timeout();
                 break;
@@ -355,13 +487,19 @@ void protocol_poll(void)
                 rx_addr = c & 0x0Fu;
                 rx_targeted = (device_addr != PROTO_ADDR_UNASSIGNED && rx_addr == device_addr) ? 1u : 0u;
                 rx_crc = crc8_update(PROTO_CRC8_INIT, c);
-
-                if (!rx_targeted)
-                    uart_putc(c);
+                rx_addr_tx[0] = c;
 
                 rx_state = PROTO_RX_ADDR_CMD;
                 protocol_restart_timeout();
             }
+            break;
+
+        case PROTO_RX_ENUM_IGNORE_COUNTER:
+            rx_state = PROTO_RX_ENUM_IGNORE_CRC;
+            break;
+
+        case PROTO_RX_ENUM_IGNORE_CRC:
+            protocol_reset();
             break;
 
         case PROTO_RX_ENUM_COUNTER:
@@ -382,14 +520,64 @@ void protocol_poll(void)
                 forward_crc = crc8_update(forward_crc, PROTO_SYNC_ENUM);
                 forward_crc = crc8_update(forward_crc, next);
                 uart_putc(forward_crc);
+            } else {
+                diag_count_inc(&diag_bad_crc_count);
+                protocol_abort_frame(PROTO_ABORT_ENUM_BAD_CRC);
+                return;
             }
             protocol_reset();
             break;
 
-        case PROTO_RX_STATUS_FORWARD:
-            uart_putc(c);
-            if (--rx_forward_remaining == 0u)
+        case PROTO_RX_DIAG_FORWARD:
+            if (rx_diag_tx_pos < sizeof(rx_diag_tx))
+                rx_diag_tx[rx_diag_tx_pos] = c;
+
+            rx_diag_tx_pos++;
+
+            if (rx_diag_tx_pos >= sizeof(rx_diag_tx)) {
+                uint8_t crc = PROTO_CRC8_INIT;
+                uint8_t i;
+
+                for (i = 0; i < (PROTO_DIAG_FRAME_SIZE - 1u); i++)
+                    crc = crc8_update(crc, rx_diag_tx[i]);
+
+                if (rx_diag_tx[PROTO_DIAG_FRAME_SIZE - 1u] == crc) {
+                    send_fixed_frame(rx_diag_tx, PROTO_DIAG_FRAME_SIZE);
+                } else {
+                    diag_count_inc(&diag_bad_crc_count);
+                    diag_count_inc(&diag_false_sync_count);
+                    protocol_abort_frame(PROTO_ABORT_DIAG_BAD_CRC);
+                    return;
+                }
+
                 protocol_reset();
+            }
+            break;
+
+        case PROTO_RX_STATUS_FORWARD:
+            if (rx_status_tx_pos < sizeof(rx_status_tx))
+                rx_status_tx[rx_status_tx_pos] = c;
+
+            rx_status_tx_pos++;
+
+            if (rx_status_tx_pos >= sizeof(rx_status_tx)) {
+                uint8_t crc = PROTO_CRC8_INIT;
+                uint8_t i;
+
+                for (i = 0; i < (PROTO_STATUS_FRAME_SIZE - 1u); i++)
+                    crc = crc8_update(crc, rx_status_tx[i]);
+
+                if (rx_status_tx[PROTO_STATUS_FRAME_SIZE - 1u] == crc) {
+                    send_fixed_frame(rx_status_tx, PROTO_STATUS_FRAME_SIZE);
+                } else {
+                    diag_count_inc(&diag_bad_crc_count);
+                    diag_count_inc(&diag_false_sync_count);
+                    protocol_abort_frame(PROTO_ABORT_STATUS_BAD_CRC);
+                    return;
+                }
+
+                protocol_reset();
+            }
             break;
 
         case PROTO_RX_ADDR_CMD:
@@ -397,9 +585,7 @@ void protocol_poll(void)
             rx_crc = crc8_update(rx_crc, c);
             rx_payload_len = command_payload_len(rx_cmd);
             rx_payload_pos = 0;
-
-            if (!rx_targeted)
-                uart_putc(c);
+            rx_addr_tx[1] = c;
 
             if (rx_payload_len == 0u) {
                 rx_state = PROTO_RX_ADDR_CRC;
@@ -414,27 +600,36 @@ void protocol_poll(void)
 
             rx_payload_pos++;
             rx_crc = crc8_update(rx_crc, c);
-
-            if (!rx_targeted)
-                uart_putc(c);
+            if ((uint8_t)(2u + rx_payload_pos - 1u) < sizeof(rx_addr_tx))
+                rx_addr_tx[(uint8_t)(2u + rx_payload_pos - 1u)] = c;
 
             if (rx_payload_pos >= rx_payload_len)
                 rx_state = PROTO_RX_ADDR_CRC;
             break;
 
         case PROTO_RX_ADDR_CRC:
-            if (!rx_targeted)
-                uart_putc(c);
+            if ((uint8_t)(2u + rx_payload_len) < sizeof(rx_addr_tx))
+                rx_addr_tx[(uint8_t)(2u + rx_payload_len)] = c;
 
-            if (c == rx_crc && rx_targeted)
-                execute_addressed_command();
+            if (c == rx_crc) {
+                if (rx_targeted) {
+                    execute_addressed_command();
+                } else {
+                    diag_count_inc(&diag_addr_forward_count);
+                    send_addressed_tx((uint8_t)(3u + rx_payload_len));
+                }
+            } else {
+                diag_count_inc(&diag_bad_crc_count);
+                protocol_abort_frame(PROTO_ABORT_ADDR_BAD_CRC);
+                return;
+            }
             protocol_reset();
             break;
 
         case PROTO_RX_BROADCAST_COUNT:
             if (c > PROTO_MAX_ADDRESSED_DEV) {
-                protocol_reset();
-                break;
+                protocol_abort_frame(PROTO_ABORT_BROADCAST_COUNT);
+                return;
             }
 
             rx_crc = crc8_update(rx_crc, c);
@@ -497,18 +692,22 @@ void protocol_poll(void)
 
                 if (start_after_reply)
                     motor_start();
+            } else {
+                diag_count_inc(&diag_bad_crc_count);
+                protocol_abort_frame(PROTO_ABORT_BROADCAST_BAD_CRC);
+                return;
             }
             protocol_reset();
             break;
 
         default:
-            protocol_reset();
-            break;
+            protocol_abort_frame(PROTO_ABORT_PARSER_DEFAULT);
+            return;
         }
 
         if (uart_rx_overflowed()) {
-            uart_rx_flush();
-            protocol_reset();
+            diag_count_inc(&diag_rx_overflow_count);
+            protocol_abort_frame(PROTO_ABORT_RX_OVERFLOW);
             return;
         }
     }

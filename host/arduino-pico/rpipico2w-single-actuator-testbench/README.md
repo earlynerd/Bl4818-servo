@@ -21,8 +21,8 @@ Default wiring:
 
 Notes:
 
-- The current production BL4818 firmware default is `250000` baud, so this
-  testbench uses `250000` on the ring by default.
+- The current production BL4818 firmware default is `115200` baud, so this
+  testbench uses `115200` on the ring by default.
 - The AS5047 chain is configured for SPI mode `1`.
 - Only actuator address `0` is actively controlled. If more devices enumerate,
   the others receive zero duty.

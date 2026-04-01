@@ -78,12 +78,12 @@ __sfr __at(0xC6) RH3;      /* Page 0 (shares C6 with PIOCON1 on page 1) */
 
 /* ── Watchdog Timer ──────────────────────────────────────────────────────── */
 __sfr __at(0xAA) WDCON;    /* TA protected */
-#define WDCON_WDTEN   0x80u
+#define WDCON_WDTR    0x80u
 #define WDCON_WDCLR   0x40u
 #define WDCON_WDTF    0x20u
 #define WDCON_WIDPD   0x10u
 #define WDCON_WDTRF   0x08u
-#define WDCON_WPS_MASK 0x07u
+#define WDCON_WDPS_MASK 0x07u
 
 /* ── Interrupt Registers ─────────────────────────────────────────────────── */
 /*     IE  at 0xA8 (declared above) */
@@ -317,8 +317,9 @@ __sbit __at(0xEF) ADCF;
 
 /* ── Clock Configuration ─────────────────────────────────────────────────── */
 #define SET_HIRC_24MHZ() do { \
+    uint8_t _rctrim1 = (uint8_t)(RCTRIM1 | 0x10u); \
     TIMED_ACCESS(); \
-    RCTRIM1 |= 0x10;   /* Select HIRC24 using the current trim setting */ \
+    RCTRIM1 = _rctrim1;   /* Select HIRC24 using the current trim setting */ \
     TIMED_ACCESS(); \
     CKSWT = 0x00;  /* HIRC as system clock */ \
     CKDIV = 0x00;  /* No divider */ \

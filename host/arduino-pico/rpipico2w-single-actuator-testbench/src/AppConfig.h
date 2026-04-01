@@ -8,7 +8,7 @@ constexpr uint32_t kUsbBaud = 115200;
 
 constexpr uint8_t kRingTxPin = 4;
 constexpr uint8_t kRingRxPin = 5;
-constexpr uint32_t kRingBaud = 250000;
+constexpr uint32_t kRingBaud = 115200;
 constexpr uint8_t kControlledAddress = 0;
 constexpr uint16_t kDefaultTorqueLimitMa = 2500;
 

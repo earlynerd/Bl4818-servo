@@ -54,7 +54,7 @@ Every addressed command returns the device's fixed-length status frame with CRC.
 
 Current production firmware default:
 
-- Ring UART baud: `250000`
+- Ring UART baud: `115200`
 - USB monitor baud in the example projects: `115200`
 
 ## Example

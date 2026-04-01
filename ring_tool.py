@@ -6,10 +6,12 @@ Examples:
     python ring_tool.py -p COM7 enumerate
     python ring_tool.py -p COM7 probe
     python ring_tool.py -p COM7 status 0
+    python ring_tool.py -p COM7 diag 0
     python ring_tool.py -p COM7 set-duty 0 250
     python ring_tool.py -p COM7 torque 0 2500
     python ring_tool.py -p COM7 broadcast 200 0 0
     python ring_tool.py -p COM7 validate --cycles 500 --duty 150
+    python ring_tool.py -p COM7 stress-invalid --pattern addr-bad-crc --cycles 20
 
 Requires: pyserial (pip install pyserial)
 """
@@ -18,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import random
 import struct
 import sys
 import time
@@ -31,6 +34,7 @@ except ImportError:
     sys.exit(1)
 
 
+SYNC_DIAG = 0x7D
 SYNC_STATUS = 0x7E
 SYNC_ENUMERATE = 0x7F
 SYNC_ADDRESS_BASE = 0x80
@@ -41,8 +45,10 @@ CMD_SET_TORQUE = 0x02
 CMD_STOP = 0x03
 CMD_CLEAR_FAULT = 0x04
 CMD_QUERY_STATUS = 0x10
+CMD_QUERY_DIAG = 0x11
 
 MAX_DEVICES = 16
+DIAG_FRAME_SIZE = 16
 STATUS_FRAME_SIZE = 7
 DEFAULT_TIMEOUT_MS = 100
 DEFAULT_OPEN_SETTLE_MS = 250
@@ -77,11 +83,23 @@ class MotorStatus:
     hall: int
 
 
+@dataclasses.dataclass
+class ProtocolDiag:
+    flags: int
+    last_abort_reason: int
+    bad_crc_count: int
+    timeout_abort_count: int
+    rx_overflow_count: int
+    frame_abort_count: int
+    false_sync_count: int
+    addr_forward_count: int
+
+
 class BL4818RingClient:
     def __init__(
         self,
         port: str,
-        baudrate: int = 250000,
+        baudrate: int = 115200,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
         open_settle_ms: int = DEFAULT_OPEN_SETTLE_MS,
         trace: bool = False,
@@ -182,6 +200,40 @@ class BL4818RingClient:
     def query_status(self, address: int) -> MotorStatus:
         return self._send_addressed(address, CMD_QUERY_STATUS, b"")
 
+    def query_diag(self, address: int) -> ProtocolDiag:
+        self._validate_address(address)
+        frame = bytes((SYNC_ADDRESS_BASE | address, CMD_QUERY_DIAG))
+        packet = frame + bytes((crc8(frame),))
+        response = self._transaction(packet, self._validate_diag_frame, DIAG_FRAME_SIZE)
+        return self._parse_diag(response)
+
+    def inject_raw(self, payload: bytes, settle_ms: float = 10.0) -> bytes:
+        if not self.ser:
+            raise RingError("serial port is not open")
+
+        self.clear_input()
+        written = self.ser.write(payload)
+        if written != len(payload):
+            raise RingError(f"short raw write: wrote {written} of {len(payload)} bytes")
+
+        self.ser.flush()
+        self._trace_bytes("tx-raw", payload)
+
+        observed = bytearray()
+        deadline = time.monotonic() + max(settle_ms, 0.0) / 1000.0
+        while time.monotonic() < deadline:
+            waiting = max(self.ser.in_waiting, 1)
+            chunk = self.ser.read(waiting)
+            if chunk:
+                observed.extend(chunk)
+                continue
+            time.sleep(0.001)
+
+        if observed:
+            self._trace_bytes("rx-raw", bytes(observed))
+
+        return bytes(observed)
+
     def _send_addressed(self, address: int, cmd: int, payload: bytes) -> MotorStatus:
         self._validate_address(address)
         frame = bytes((SYNC_ADDRESS_BASE | address, cmd)) + payload
@@ -199,7 +251,7 @@ class BL4818RingClient:
         if not self.ser:
             raise RingError("serial port is not open")
 
-        for attempt in range(2):
+        for attempt in range(1):
             self.clear_input()
 
             written = self.ser.write(packet)
@@ -289,6 +341,24 @@ class BL4818RingClient:
         )
 
     @staticmethod
+    def _parse_diag(frame: bytes) -> ProtocolDiag:
+        if len(frame) != DIAG_FRAME_SIZE:
+            raise RingError(f"expected {DIAG_FRAME_SIZE} diagnostic bytes, got {len(frame)}")
+        if not BL4818RingClient._validate_diag_frame(frame):
+            raise RingError(f"bad diagnostic frame: {frame.hex(' ')}")
+
+        return ProtocolDiag(
+            flags=frame[1],
+            last_abort_reason=frame[2],
+            bad_crc_count=struct.unpack(">H", frame[3:5])[0],
+            timeout_abort_count=struct.unpack(">H", frame[5:7])[0],
+            rx_overflow_count=struct.unpack(">H", frame[7:9])[0],
+            frame_abort_count=struct.unpack(">H", frame[9:11])[0],
+            false_sync_count=struct.unpack(">H", frame[11:13])[0],
+            addr_forward_count=struct.unpack(">H", frame[13:15])[0],
+        )
+
+    @staticmethod
     def _validate_fixed_response(frame: bytes, prefix: bytes) -> bool:
         if len(frame) < len(prefix) + 1:
             return False
@@ -303,6 +373,14 @@ class BL4818RingClient:
         if frame[0] != SYNC_STATUS:
             return False
         return frame[6] == crc8(frame[:6])
+
+    @staticmethod
+    def _validate_diag_frame(frame: bytes) -> bool:
+        if len(frame) != DIAG_FRAME_SIZE:
+            return False
+        if frame[0] != SYNC_DIAG:
+            return False
+        return frame[-1] == crc8(frame[:-1])
 
 
 def auto_detect_port() -> Optional[str]:
@@ -348,6 +426,43 @@ def format_status(address: int, status: MotorStatus) -> str:
         f"addr={address} state={status.state} fault={status.fault} "
         f"current_ma={status.current_ma} hall={status.hall}"
     )
+
+
+def format_diag(address: int, diag: ProtocolDiag) -> str:
+    flags = []
+    if diag.flags & 0x01:
+        flags.append("enumerated")
+    if diag.flags & 0x02:
+        flags.append("wdt-reset")
+    flag_text = ",".join(flags) if flags else "none"
+
+    return (
+        f"addr={address} flags={flag_text} last_abort={diag.last_abort_reason} "
+        f"bad_crc={diag.bad_crc_count} timeout_abort={diag.timeout_abort_count} "
+        f"rx_overflow={diag.rx_overflow_count} frame_abort={diag.frame_abort_count} "
+        f"false_sync={diag.false_sync_count} addr_forward={diag.addr_forward_count}"
+    )
+
+
+def build_invalid_pattern(name: str, address: int) -> bytes:
+    if name == "enum-bad-crc":
+        frame = bytes((SYNC_ENUMERATE, 0x00))
+        return frame + bytes(((crc8(frame) ^ 0xFF) & 0xFF,))
+    if name == "enum-truncated":
+        return bytes((SYNC_ENUMERATE, 0x00))
+    if name == "status-false-sync":
+        frame = bytes((SYNC_STATUS, 0x00, 0x00, 0x00, 0x00, 0x00))
+        return frame + bytes(((crc8(frame) ^ 0x55) & 0xFF,))
+    if name == "addr-bad-crc":
+        frame = bytes((SYNC_ADDRESS_BASE | address, CMD_QUERY_STATUS))
+        return frame + bytes(((crc8(frame) ^ 0xA5) & 0xFF,))
+    if name == "broadcast-bad-crc":
+        frame = bytes((SYNC_BROADCAST, 0x01, 0x00, 0x00))
+        return frame + bytes(((crc8(frame) ^ 0x5A) & 0xFF,))
+    if name == "random3":
+        return bytes(random.getrandbits(8) for _ in range(3))
+
+    raise RingError(f"unknown invalid pattern: {name}")
 
 
 def require_enumeration(client: BL4818RingClient) -> int:
@@ -403,6 +518,46 @@ def run_validate(client: BL4818RingClient, args: argparse.Namespace) -> None:
         print(f"last {format_status(last_addr, last_status)}")
 
 
+def run_stress_invalid(client: BL4818RingClient, args: argparse.Namespace) -> None:
+    count = require_enumeration(client)
+
+    if args.address < 0 or args.address >= count:
+        raise RingError(f"address must be in range 0..{count - 1}")
+
+    recoveries = 0
+    failures = 0
+
+    for cycle in range(args.cycles):
+        pattern = build_invalid_pattern(args.pattern, args.address)
+        raw_rx = client.inject_raw(pattern, args.gap_ms)
+
+        try:
+            diag = client.query_diag(args.address)
+            recoveries += 1
+            if args.print_every > 0 and (
+                cycle == 0
+                or (cycle + 1) % args.print_every == 0
+                or (cycle + 1) == args.cycles
+            ):
+                print(
+                    f"cycle={cycle + 1}/{args.cycles} pattern={args.pattern} "
+                    f"raw_rx={raw_rx.hex(' ').upper() if raw_rx else '-'} "
+                    f"{format_diag(args.address, diag)}"
+                )
+        except RingError as exc:
+            failures += 1
+            print(
+                f"cycle={cycle + 1}/{args.cycles} pattern={args.pattern} "
+                f"raw_rx={raw_rx.hex(' ').upper() if raw_rx else '-'} "
+                f"recovery_failed={exc}"
+            )
+
+    print(
+        f"stress-invalid complete cycles={args.cycles} recoveries={recoveries} "
+        f"failures={failures}"
+    )
+
+
 def parse_baud_list(spec: str) -> list[int]:
     baud_list = []
     for part in spec.split(","):
@@ -452,7 +607,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Direct binary protocol helper for BL4818 production firmware"
     )
     parser.add_argument("-p", "--port", help="Serial port (auto-detected if omitted)")
-    parser.add_argument("-b", "--baud", type=int, default=250000, help="Baud rate (default: 250000)")
+    parser.add_argument("-b", "--baud", type=int, default=115200, help="Baud rate (default: 115200)")
     parser.add_argument(
         "--timeout-ms",
         type=int,
@@ -476,13 +631,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     probe_parser.add_argument(
         "--bauds",
-        default="250000,115200",
-        help="Comma-separated baud rates to try (default: 250000,115200)",
+        default="115200,250000",
+        help="Comma-separated baud rates to try (default: 115200,250000)",
     )
     subparsers.add_parser("enumerate", help="Enumerate devices and print the count")
 
     status_parser = subparsers.add_parser("status", help="Query status from one addressed device")
     status_parser.add_argument("address", type=int, help="Device address")
+
+    diag_parser = subparsers.add_parser("diag", help="Query transport diagnostics from one addressed device")
+    diag_parser.add_argument("address", type=int, help="Device address")
 
     duty_parser = subparsers.add_parser("set-duty", help="Set signed duty on one addressed device")
     duty_parser.add_argument("address", type=int, help="Device address")
@@ -530,6 +688,40 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=25,
         help="Print one progress line every N cycles (default: 25)",
+    )
+
+    stress_parser = subparsers.add_parser(
+        "stress-invalid",
+        help="Inject malformed traffic and verify that the next diagnostic query still recovers",
+    )
+    stress_parser.add_argument(
+        "--cycles", type=int, default=50, help="Number of malformed-injection cycles to run"
+    )
+    stress_parser.add_argument("--address", type=int, default=0, help="Address to query after each injection")
+    stress_parser.add_argument(
+        "--pattern",
+        choices=(
+            "enum-bad-crc",
+            "enum-truncated",
+            "status-false-sync",
+            "addr-bad-crc",
+            "broadcast-bad-crc",
+            "random3",
+        ),
+        default="addr-bad-crc",
+        help="Malformed payload pattern to inject",
+    )
+    stress_parser.add_argument(
+        "--gap-ms",
+        type=float,
+        default=10.0,
+        help="Idle time to allow after raw injection before querying diagnostics",
+    )
+    stress_parser.add_argument(
+        "--print-every",
+        type=int,
+        default=1,
+        help="Print one line every N cycles (default: 1)",
     )
 
     return parser
@@ -594,6 +786,10 @@ def main() -> int:
             print(format_status(args.address, client.query_status(args.address)))
             return 0
 
+        if args.command == "diag":
+            print(format_diag(args.address, client.query_diag(args.address)))
+            return 0
+
         if args.command == "set-duty":
             print(format_status(args.address, client.set_duty(args.address, args.duty)))
             return 0
@@ -612,6 +808,10 @@ def main() -> int:
 
         if args.command == "validate":
             run_validate(client, args)
+            return 0
+
+        if args.command == "stress-invalid":
+            run_stress_invalid(client, args)
             return 0
 
         raise RingError(f"unknown command: {args.command}")
