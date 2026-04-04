@@ -17,12 +17,28 @@ void SingleActuatorController::setIntegralGain(float ki)
     ki_ = ki;
 }
 
+void SingleActuatorController::setGravityGain(float kg, float offsetDegrees)
+{
+    kg_ = kg;
+    gravityOffsetDegrees_ = offsetDegrees;
+}
+
 void SingleActuatorController::setMaxDuty(int16_t maxDuty)
 {
     if (maxDuty < 0) {
         maxDuty = static_cast<int16_t>(-maxDuty);
     }
     maxDuty_ = maxDuty;
+}
+
+void SingleActuatorController::setMinimumDuty(int16_t minDuty)
+{
+    minDuty_ = static_cast<float>(minDuty);
+}
+
+float SingleActuatorController::minimumDuty()
+{
+    return minDuty_;
 }
 
 void SingleActuatorController::setVelocityAlpha(float alpha)
@@ -60,6 +76,16 @@ float SingleActuatorController::ki() const
 float SingleActuatorController::kd() const
 {
     return kd_;
+}
+
+float SingleActuatorController::kg() const
+{
+    return kg_;
+}
+
+float SingleActuatorController::gravityOffsetDegrees() const
+{
+    return gravityOffsetDegrees_;
 }
 
 float SingleActuatorController::velocityAlpha() const
@@ -161,16 +187,22 @@ void SingleActuatorController::update(uint16_t rawAngle, float dtSeconds)
 
     const float proportional = kp_ * positionError;
     const float derivative = kd_ * velocityDegreesPerSecond_;
-    const float outputWithoutNewIntegral = proportional + (ki_ * integralError_) - derivative;
+    const float gravity = kg_ * cosf((positionDegrees_ + gravityOffsetDegrees_) * (M_PI / 180.0f));
+    const float outputWithoutNewIntegral = proportional + (ki_ * integralError_) - derivative + gravity;
 
     if (!((outputWithoutNewIntegral >= static_cast<float>(maxDuty_) && positionError > 0.0f) ||
           (outputWithoutNewIntegral <= -static_cast<float>(maxDuty_) && positionError < 0.0f))) {
         integralError_ = clampedIntegral;
     }
 
-    const float output = proportional + (ki_ * integralError_) - derivative;
+    const float output = proportional + (ki_ * integralError_) - derivative + gravity;
 
-    dutyCommand_ = clampDuty(output, maxDuty_);
+    if (fabsf(output) < 0.1f) {
+        dutyCommand_ = 0;
+    } else {
+        float compensated = (output > 0.0f) ? (output + minDuty_) : (output - minDuty_);
+        dutyCommand_ = clampDuty(compensated, maxDuty_);
+    }
 }
 
 void SingleActuatorController::zeroAtCurrentPosition()

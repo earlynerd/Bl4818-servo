@@ -86,14 +86,14 @@ uint16_t adc_read_current_ma(void)
      * Direct shunt (20mΩ, R020), no amplifier. VDD = 5.0V reference.
      *
      * I_mA = raw × ADC_TO_MA_NUM / ADC_TO_MA_DEN
-     *      = raw × 2500 / 41
+     *      = raw × 2500 / 41 ≈ raw × 61
      *
      * At 20mΩ: ~61mA per LSB, 5A = ADC ~82
      *
-     * Use 32-bit intermediate to avoid overflow.
+     * We use a single 32-bit multiplication (raw * 61) and omit the division
+     * by 41. The error (60.975 vs 61.00) is ~0.04%, which is well within 
+     * shunt tolerance (1-5%) and dramatically faster on an 8-bit MCU.
      */
-    uint32_t ma = (uint32_t)raw * ADC_TO_MA_NUM / ADC_TO_MA_DEN;
-
-    return (uint16_t)ma;
+    return (uint16_t)((uint32_t)raw * 61u);
 }
 

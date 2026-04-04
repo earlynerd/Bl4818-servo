@@ -19,3 +19,4 @@ build/
 .idea/
 __pycache__
 .pio/
+/m2003-motor/OpenOCD

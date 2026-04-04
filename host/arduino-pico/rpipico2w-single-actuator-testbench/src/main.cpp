@@ -14,6 +14,17 @@ BL4818RingMaster gRing(target_uart);
 As5047Chain gEncoders(SPI, AppConfig::kSpiCsPin);
 SingleActuatorController gController;
 
+struct CaptureSample {
+    float pos;
+    float vel;
+    int16_t duty;
+};
+
+constexpr size_t kCaptureBufferSize = 2000;
+static CaptureSample gCaptureBuffer[kCaptureBufferSize];
+static size_t gCaptureIndex = 0;
+static bool gCaptureActive = false;
+
 int16_t gDuties[BL4818RingMaster::kMaxDevices];
 BL4818RingMaster::Status gLastStatus;
 As5047Sample gLastEncoderSample;
@@ -25,11 +36,16 @@ bool gRingReady = false;
 bool gArmed = false;
 bool gStreamTelemetry = false;
 bool gTapActive = false;
-bool gRingTraceEnabled = true;
+bool gProbeActive = false;
+bool gStrikePulseActive = false;
+bool gRingTraceEnabled = false;
 
 float gHomeTargetDeg = AppConfig::kDefaultHomeTargetDeg;
 float gStrikeTargetDeg = AppConfig::kDefaultStrikeTargetDeg;
+float gProbeSurfaceDeg = 0.0f;
 uint32_t gTapHoldMs = AppConfig::kDefaultTapHoldMs;
+uint32_t gStrikePulseEndMs = 0;
+int16_t gStrikePulseDuty = 0;
 
 uint32_t gNextControlAtUs = 0;
 uint32_t gNextCommandAtUs = 0;
@@ -111,7 +127,15 @@ void printHelp()
     Serial.println("  gains <kp> <kd>");
     Serial.println("  ki <gain>");
     Serial.println("  maxduty <0..1200>");
+    Serial.println("  minduty <0..500>");
+    Serial.println("  valpha <0.0..1.0>");
     Serial.println("  torque <mA>");
+    Serial.println("  gravity <kg> <offset>");
+    Serial.println("  probe");
+    Serial.println("  setsurf");
+    Serial.println("  strike_pulse <duty> <ms>");
+    Serial.println("  capture");
+    Serial.println("  dump");
     Serial.println("  stream <0|1>");
     Serial.println("  trace <0|1>");
 }
@@ -163,10 +187,21 @@ void printRingStatus()
     Serial.print(gController.kd(), 4);
     Serial.print(" maxduty=");
     Serial.print(gController.maxDuty());
+    Serial.print(" minduty=");
+    Serial.print(gController.minimumDuty());
+    Serial.print(" valpha=");
+    Serial.print(gController.velocityAlpha(), 4);
     Serial.print(" dir=");
     Serial.print(gController.direction());
     Serial.print(" trace=");
     Serial.println(gRingTraceEnabled ? 1 : 0);
+
+    Serial.print("surface_deg=");
+    Serial.print(gProbeSurfaceDeg, 3);
+    Serial.print(" home_deg=");
+    Serial.print(gHomeTargetDeg, 3);
+    Serial.print(" strike_deg=");
+    Serial.println(gStrikeTargetDeg, 3);
 }
 
 void printTelemetry()
@@ -366,6 +401,42 @@ void runControlTick()
         return;
     }
 
+    if (gProbeActive) {
+        const float kProbeStepDeg = 0.1f;
+        const float kProbeErrorThresholdDeg = 3.0f;
+
+        gController.setTargetDegrees(gController.targetDegrees() + kProbeStepDeg);
+        if (fabsf(gController.targetDegrees() - gController.positionDegrees()) > kProbeErrorThresholdDeg) {
+            gProbeSurfaceDeg = gController.positionDegrees();
+            gProbeActive = false;
+            gController.setTargetDegrees(gHomeTargetDeg);
+            Serial.print("probe finished: surface_deg=");
+            Serial.println(gProbeSurfaceDeg, 3);
+
+            // Auto-set strike target to 2 degrees past the surface for a positive hit
+            gStrikeTargetDeg = gProbeSurfaceDeg + 2.0f;
+            Serial.print("auto-set strike_deg=");
+            Serial.println(gStrikeTargetDeg, 3);
+        }
+    }
+
+    if (gCaptureActive && gCaptureIndex < kCaptureBufferSize) {
+        gCaptureBuffer[gCaptureIndex].pos = gController.positionDegrees();
+        gCaptureBuffer[gCaptureIndex].vel = gController.velocityDegreesPerSecond();
+        gCaptureBuffer[gCaptureIndex].duty = gAppliedDutyCommand;
+        gCaptureIndex++;
+        if (gCaptureIndex >= kCaptureBufferSize) {
+            gCaptureActive = false;
+        }
+    }
+
+    if (gStrikePulseActive) {
+        if (timeReached(millis(), gStrikePulseEndMs)) {
+            gStrikePulseActive = false;
+            gController.setTargetDegrees(gHomeTargetDeg);
+        }
+    }
+
     if (gTapActive && timeReached(millis(), gTapReturnAtMs)) {
         gTapActive = false;
         gController.setTargetDegrees(gHomeTargetDeg);
@@ -375,9 +446,24 @@ void runControlTick()
         return;
     }
 
+    int16_t targetDuty = filteredDutyCommand();
+    if (gStrikePulseActive) {
+        targetDuty = gStrikePulseDuty;
+    }
+
     if (useAddressedDutyPath()) {
         const uint32_t nowUs = micros();
-        const int16_t duty = slewLimitedDutyCommand(filteredDutyCommand());
+        int16_t duty;
+        
+        if (gStrikePulseActive) {
+            // Sharper impact: reach full power in ~2-3ms
+            const int16_t strikeStep = 300;
+            if (targetDuty > gAppliedDutyCommand + strikeStep) duty = gAppliedDutyCommand + strikeStep;
+            else if (targetDuty < gAppliedDutyCommand - strikeStep) duty = gAppliedDutyCommand - strikeStep;
+            else duty = targetDuty;
+        } else {
+            duty = slewLimitedDutyCommand(targetDuty);
+        }
 
         if (!timeReached(nowUs, gNextCommandAtUs)) {
             return;
@@ -405,7 +491,7 @@ void runControlTick()
     }
 
     clearDutyArray();
-    gDuties[AppConfig::kControlledAddress] = filteredDutyCommand();
+    gDuties[AppConfig::kControlledAddress] = targetDuty;
 
     if (!gRing.broadcastDuty(gDuties, gDeviceCount)) {
         gConsecutiveRingFailures++;
@@ -426,6 +512,10 @@ void handleTapCommand(char *arg)
     if (arg && arg[0] != '\0') {
         gTapHoldMs = static_cast<uint32_t>(strtoul(arg, nullptr, 10));
     }
+
+    // Auto-trigger capture for analysis
+    gCaptureIndex = 0;
+    gCaptureActive = true;
 
     gController.setTargetDegrees(gStrikeTargetDeg);
     gTapReturnAtMs = millis() + gTapHoldMs;
@@ -585,6 +675,32 @@ void handleLine(char *line)
         return;
     }
 
+    if (strcmp(command, "minduty") == 0) {
+        char *arg = strtok_r(nullptr, " \t", &context);
+        if (!arg) {
+            Serial.println("usage: minduty <0..500>");
+            return;
+        }
+
+        gController.setMinimumDuty(static_cast<int16_t>(strtol(arg, nullptr, 10)));
+        Serial.print("minduty=");
+        Serial.print(static_cast<int16_t>(strtol(arg, nullptr, 10))); // Simple display
+        return;
+    }
+
+    if (strcmp(command, "valpha") == 0) {
+        char *arg = strtok_r(nullptr, " \t", &context);
+        if (!arg) {
+            Serial.println("usage: valpha <0.0..1.0>");
+            return;
+        }
+
+        gController.setVelocityAlpha(strtof(arg, nullptr));
+        Serial.print("valpha=");
+        Serial.println(gController.velocityAlpha(), 4);
+        return;
+    }
+
     if (strcmp(command, "torque") == 0) {
         char *arg = strtok_r(nullptr, " \t", &context);
         if (!arg) {
@@ -599,6 +715,134 @@ void handleLine(char *line)
         if (gRingReady) {
             applyTorqueLimit();
         }
+        return;
+    }
+
+    if (strcmp(command, "gravity") == 0) {
+        char *kgArg = strtok_r(nullptr, " \t", &context);
+        char *offsetArg = strtok_r(nullptr, " \t", &context);
+        if (!kgArg || !offsetArg) {
+            Serial.println("usage: gravity <kg> <offset_deg>");
+            return;
+        }
+
+        gController.setGravityGain(strtof(kgArg, nullptr), strtof(offsetArg, nullptr));
+        Serial.print("kg=");
+        Serial.print(gController.kg(), 4);
+        Serial.print(" gravity_offset_deg=");
+        Serial.println(gController.gravityOffsetDegrees(), 3);
+        return;
+    }
+
+    if (strcmp(command, "probe") == 0) {
+        if (!gArmed) {
+            Serial.println("cannot probe: controller not armed");
+            return;
+        }
+
+        gProbeActive = true;
+        gController.setTargetDegrees(gController.positionDegrees());
+        Serial.println("probing...");
+        return;
+    }
+
+    if (strcmp(command, "setsurf") == 0) {
+        gProbeSurfaceDeg = gController.positionDegrees();
+        gStrikeTargetDeg = gProbeSurfaceDeg + 2.0f;
+        Serial.print("surface set: surface_deg=");
+        Serial.print(gProbeSurfaceDeg, 3);
+        Serial.print(" strike_deg=");
+        Serial.println(gStrikeTargetDeg, 3);
+        return;
+    }
+
+    if (strcmp(command, "strike_pulse") == 0) {
+        char *dutyArg = strtok_r(nullptr, " \t", &context);
+        char *msArg = strtok_r(nullptr, " \t", &context);
+        if (!dutyArg || !msArg) {
+            Serial.println("usage: strike_pulse <duty> <ms>");
+            return;
+        }
+
+        gStrikePulseDuty = static_cast<int16_t>(strtol(dutyArg, nullptr, 10));
+        gStrikePulseEndMs = millis() + static_cast<uint32_t>(strtoul(msArg, nullptr, 10));
+        gStrikePulseActive = true;
+        gTapActive = false;
+
+        // Auto-trigger capture
+        gCaptureIndex = 0;
+        gCaptureActive = true;
+
+        Serial.print("strike_pulse duty=");
+        Serial.print(gStrikePulseDuty);
+        Serial.print(" ms=");
+        Serial.println(msArg);
+        return;
+    }
+
+    if (strcmp(command, "capture") == 0) {
+        gCaptureIndex = 0;
+        gCaptureActive = true;
+        Serial.println("capture started");
+        return;
+    }
+
+    if (strcmp(command, "dump") == 0) {
+        Serial.println("--- capture dump start ---");
+        for (size_t i = 0; i < gCaptureIndex; i++) {
+            Serial.print(i);
+            Serial.print(",");
+            Serial.print(gCaptureBuffer[i].pos, 4);
+            Serial.print(",");
+            Serial.print(gCaptureBuffer[i].vel, 4);
+            Serial.print(",");
+            Serial.println(gCaptureBuffer[i].duty);
+        }
+        Serial.println("--- capture dump end ---");
+        return;
+    }
+
+    if (strcmp(command, "strike_ana") == 0) {
+        if (gCaptureIndex < 10) {
+            Serial.println("no capture data to analyze");
+            return;
+        }
+
+        float startPos = gCaptureBuffer[0].pos;
+        float peakPos = startPos;
+        size_t peakIdx = 0;
+        float peakVel = 0;
+
+        // Use strike duty to determine which direction we are looking for the peak
+        bool positiveStrike = (gStrikePulseDuty >= 0);
+
+        for (size_t i = 0; i < gCaptureIndex; i++) {
+            // Track peak velocity for characterization
+            if (fabsf(gCaptureBuffer[i].vel) > fabsf(peakVel)) {
+                peakVel = gCaptureBuffer[i].vel;
+            }
+
+            // Find extreme position (the physical surface)
+            if (positiveStrike) {
+                if (gCaptureBuffer[i].pos > peakPos) {
+                    peakPos = gCaptureBuffer[i].pos;
+                    peakIdx = i;
+                }
+            } else {
+                if (gCaptureBuffer[i].pos < peakPos) {
+                    peakPos = gCaptureBuffer[i].pos;
+                    peakIdx = i;
+                }
+            }
+        }
+
+        Serial.println("--- peak-position strike analysis ---");
+        Serial.print("start_pos="); Serial.println(startPos, 3);
+        Serial.print("peak_vel_dps="); Serial.println(peakVel, 3);
+        Serial.print("impact_ms="); Serial.println(peakIdx);
+        Serial.print("impact_pos="); Serial.println(peakPos, 3);
+        Serial.print("travel_dist="); Serial.println(fabsf(peakPos - startPos), 3);
+        
         return;
     }
 

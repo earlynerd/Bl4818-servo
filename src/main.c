@@ -57,12 +57,12 @@ static uint8_t tach_debug_ticks;
 #endif
 
 #if FEATURE_LOCAL_PWM_INPUT
-static volatile uint8_t local_input_locked_out;
+static __bit local_input_locked_out;
 static uint8_t local_pwm_dc_hold_ms;
 static uint8_t local_fault_retry_count;
 static uint16_t local_fault_retry_ms;
 static uint16_t local_applied_abs_duty;
-static volatile uint8_t local_pwm_seen_rise;
+static __bit local_pwm_seen_rise;
 static volatile uint8_t local_pwm_valid_cycles;
 static volatile uint8_t local_pwm_timeout_ms;
 static volatile uint16_t local_pwm_last_rise;
@@ -520,7 +520,7 @@ static void local_input_poll_fast(void) { }
 static void local_input_update(void) { }
 #endif
 
-void capture_isr(void) __interrupt(INT_CAPTURE)
+void capture_isr(void) __interrupt(INT_CAPTURE) __using(2)
 {
 #if FEATURE_LOCAL_PWM_INPUT
     if (CAPCON0 & 0x01u) {

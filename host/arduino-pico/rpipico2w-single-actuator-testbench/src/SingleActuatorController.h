@@ -8,14 +8,18 @@ public:
 
     void setGains(float kp, float kd);
     void setIntegralGain(float ki);
+    void setGravityGain(float kg, float offsetDegrees);
     void setMaxDuty(int16_t maxDuty);
+    void setMinimumDuty(int16_t minDuty);
     void setVelocityAlpha(float alpha);
     void setDirection(int8_t direction);
     void setTargetDegrees(float targetDegrees);
-
+    float minimumDuty();
     float kp() const;
     float ki() const;
     float kd() const;
+    float kg() const;
+    float gravityOffsetDegrees() const;
     float velocityAlpha() const;
     int16_t maxDuty() const;
     int8_t direction() const;
@@ -49,8 +53,12 @@ private:
     float kp_ = 0.0f;
     float ki_ = 0.0f;
     float kd_ = 0.0f;
+    float kg_ = 0.0f;
+    float gravityOffsetDegrees_ = 0.0f;
     float velocityAlpha_ = 0.2f;
+    float minDuty_ = 0.0f;
     float integralError_ = 0.0f;
+    
     int16_t maxDuty_ = 0;
     int8_t direction_ = 1;
     int16_t dutyCommand_ = 0;

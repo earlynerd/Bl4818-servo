@@ -33,12 +33,12 @@
 static volatile uint8_t __xdata rx_buf[UART_RX_BUF_SIZE];
 static volatile uint8_t rx_head;
 static volatile uint8_t rx_tail;
-static volatile uint8_t rx_overflow;
+static __bit rx_overflow;
 
 static volatile uint8_t __xdata tx_buf[UART_TX_BUF_SIZE];
 static volatile uint8_t tx_head;
 static volatile uint8_t tx_tail;
-static volatile uint8_t tx_running;
+static __bit tx_running;
 
 static uint8_t uart_irq_mode_active(void)
 {
@@ -268,7 +268,7 @@ void uart_tx_flush(void)
     }
 }
 
-void uart1_isr(void) __interrupt(INT_UART1)
+void uart1_isr(void) __interrupt(INT_UART1) __using(1)
 {
     if (RI_1) {
         uint8_t c = SBUF_1;
