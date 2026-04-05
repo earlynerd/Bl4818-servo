@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(SHELL=cmd.exe make clean)",
+      "Bash(SHELL=cmd.exe make)",
+      "Bash(make SHELL=cmd clean)",
+      "Bash(make SHELL=cmd)",
+      "Bash(arm-none-eabi-size build/m2003-motor.elf)"
+    ]
+  }
+}
