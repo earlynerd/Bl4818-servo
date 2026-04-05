@@ -1,0 +1,30 @@
+project:
+  groups:
+    - group: Source Files
+      files:
+        - file: src/main.c
+        - file: src/system_M2003.c
+        - file: src/startup_m2003.c
+        - file: src/protocol.c
+        - file: src/motor.c
+        - file: src/hall.c
+        - file: src/commutation.c
+        - file: src/app_uart.c
+        - file: src/app_pwm.c
+        - file: src/app_adc.c
+        - file: include/m2003_config.h
+        - file: include/app_adc.h
+        - file: include/app_pwm.h
+        - file: include/app_uart.h
+        - file: include/commutation.h
+        - file: include/hall.h
+        - file: include/motor.h
+        - file: include/protocol.h
+  components:
+    - component: ARM::CMSIS:CORE
+    - component: Device:Startup
+  output:
+    type:
+      - elf
+      - hex
+      - map

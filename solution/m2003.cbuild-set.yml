@@ -1,0 +1,5 @@
+cbuild-set:
+  generated-by: vscode-cmsis-csolution version 1.56.0
+  environment: {}
+  contexts:
+    - context: m2003-motor.Debug+M2003FC1AE

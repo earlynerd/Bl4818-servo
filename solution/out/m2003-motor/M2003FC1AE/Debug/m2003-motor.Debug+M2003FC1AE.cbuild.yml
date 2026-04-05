@@ -1,0 +1,179 @@
+build:
+  generated-by: csolution version 2.13.0
+  solution: ../../../../m2003.csolution.yml
+  project: ../../../../m2003-motor/m2003-motor.cproject.yml
+  context: m2003-motor.Debug+M2003FC1AE
+  compiler: AC6
+  device: Nuvoton::M2003FC1AE
+  device-pack: Nuvoton::NuMicroM23_DFP@1.0.4
+  processor:
+    core: Cortex-M23
+  packs:
+    - pack: ARM::CMSIS@6.3.0
+      path: ${CMSIS_PACK_ROOT}/ARM/CMSIS/6.3.0
+    - pack: Nuvoton::NuMicroM23_DFP@1.0.4
+      path: ${CMSIS_PACK_ROOT}/Nuvoton/NuMicroM23_DFP/1.0.4
+  optimize: none
+  debug: on
+  misc:
+    ASM:
+      - -gdwarf-5
+      - -masm=auto
+    C:
+      - -gdwarf-5
+      - -std=gnu11
+      - -Wno-macro-redefined
+      - -Wno-pragma-pack
+      - -Wno-parentheses-equality
+      - -Wno-license-management
+    CPP:
+      - -gdwarf-5
+      - -Wno-macro-redefined
+      - -Wno-pragma-pack
+      - -Wno-parentheses-equality
+      - -Wno-license-management
+    Link:
+      - --entry=Reset_Handler
+      - --info=summarysizes
+      - --summary_stderr
+      - --diag_suppress=L6314W
+  define:
+    - _RTE_
+  define-asm:
+    - _RTE_
+  add-path:
+    - ../../../../m2003-motor/RTE/_Debug_M2003FC1AE
+    - ${CMSIS_PACK_ROOT}/ARM/CMSIS/6.3.0/CMSIS/Core/Include
+    - ${CMSIS_PACK_ROOT}/Nuvoton/NuMicroM23_DFP/1.0.4/Device/M2003/Include
+    - ${CMSIS_PACK_ROOT}/Nuvoton/NuMicroM23_DFP/1.0.4/Device/M2003/StdDriver/inc
+  add-path-asm:
+    - ../../../../m2003-motor/RTE/_Debug_M2003FC1AE
+    - ${CMSIS_PACK_ROOT}/ARM/CMSIS/6.3.0/CMSIS/Core/Include
+    - ${CMSIS_PACK_ROOT}/Nuvoton/NuMicroM23_DFP/1.0.4/Device/M2003/Include
+    - ${CMSIS_PACK_ROOT}/Nuvoton/NuMicroM23_DFP/1.0.4/Device/M2003/StdDriver/inc
+  output-dirs:
+    intdir: ../../../../tmp
+    outdir: .
+    rtedir: ../../../../m2003-motor/RTE
+  output:
+    - type: elf
+      file: m2003-motor.axf
+    - type: hex
+      file: m2003-motor.hex
+    - type: map
+      file: m2003-motor.axf.map
+    - type: comp-db
+      file: compile_commands.json
+  components:
+    - component: ARM::CMSIS:CORE@6.2.0
+      condition: ARMv6_7_8-M Device
+      from-pack: ARM::CMSIS@6.3.0
+      selected-by: ARM::CMSIS:CORE
+      files:
+        - file: ${CMSIS_PACK_ROOT}/ARM/CMSIS/6.3.0/CMSIS/Core/Include
+          category: include
+          version: 6.2.0
+        - file: ${CMSIS_PACK_ROOT}/ARM/CMSIS/6.3.0/CMSIS/Core/Include/tz_context.h
+          category: header
+          version: 6.2.0
+        - file: ${CMSIS_PACK_ROOT}/ARM/CMSIS/6.3.0/CMSIS/Core/Template/ARMv8-M/main_s.c
+          category: sourceC
+          attr: template
+          version: 1.1.1
+          select: Secure mode 'main' module for ARMv8-M
+        - file: ${CMSIS_PACK_ROOT}/ARM/CMSIS/6.3.0/CMSIS/Core/Template/ARMv8-M/tz_context.c
+          category: sourceC
+          attr: template
+          version: 1.1.1
+          select: RTOS Context Management (TrustZone for ARMv8-M)
+        - file: ${CMSIS_PACK_ROOT}/ARM/CMSIS/6.3.0/CMSIS/Documentation/html/Core/index.html
+          category: doc
+          version: 6.2.0
+    - component: Nuvoton::Device:Startup@0.00.001
+      condition: M23NuMicro M2003 Device
+      from-pack: Nuvoton::NuMicroM23_DFP@1.0.4
+      selected-by: Device:Startup
+      files:
+        - file: ${CMSIS_PACK_ROOT}/Nuvoton/NuMicroM23_DFP/1.0.4/Device/M2003/Include
+          category: include
+          version: 0.00.001
+        - file: ${CMSIS_PACK_ROOT}/Nuvoton/NuMicroM23_DFP/1.0.4/Device/M2003/Include/M2003.h
+          category: header
+          version: 0.00.001
+        - file: ${CMSIS_PACK_ROOT}/Nuvoton/NuMicroM23_DFP/1.0.4/Device/M2003/Include/NuMicro.h
+          category: header
+          version: 0.00.001
+        - file: ${CMSIS_PACK_ROOT}/Nuvoton/NuMicroM23_DFP/1.0.4/Device/M2003/Include/system_M2003.h
+          category: header
+          version: 0.00.001
+        - file: ${CMSIS_PACK_ROOT}/Nuvoton/NuMicroM23_DFP/1.0.4/Device/M2003/StdDriver/inc
+          category: include
+          version: 0.00.001
+        - file: ../../../../m2003-motor/RTE/Device/M2003FC1AE/retarget.c
+          category: sourceC
+          attr: config
+          version: 0.00.001
+        - file: ../../../../m2003-motor/RTE/Device/M2003FC1AE/startup_M2003.s
+          category: sourceAsm
+          attr: config
+          version: 0.00.001
+        - file: ../../../../m2003-motor/RTE/Device/M2003FC1AE/system_M2003.c
+          category: source
+          attr: config
+          version: 0.00.001
+  linker:
+    script: ../../../../m2003-motor/RTE/Device/M2003FC1AE/ac6_linker_script.sct.src
+    regions: ../../../../m2003-motor/RTE/Device/M2003FC1AE/regions_M2003FC1AE.h
+  groups:
+    - group: Source Files
+      files:
+        - file: ../../../../m2003-motor/src/main.c
+          category: sourceC
+        - file: ../../../../m2003-motor/src/system_M2003.c
+          category: sourceC
+        - file: ../../../../m2003-motor/src/startup_m2003.c
+          category: sourceC
+        - file: ../../../../m2003-motor/src/protocol.c
+          category: sourceC
+        - file: ../../../../m2003-motor/src/motor.c
+          category: sourceC
+        - file: ../../../../m2003-motor/src/hall.c
+          category: sourceC
+        - file: ../../../../m2003-motor/src/commutation.c
+          category: sourceC
+        - file: ../../../../m2003-motor/src/app_uart.c
+          category: sourceC
+        - file: ../../../../m2003-motor/src/app_pwm.c
+          category: sourceC
+        - file: ../../../../m2003-motor/src/app_adc.c
+          category: sourceC
+        - file: ../../../../m2003-motor/include/m2003_config.h
+          category: header
+        - file: ../../../../m2003-motor/include/app_adc.h
+          category: header
+        - file: ../../../../m2003-motor/include/app_pwm.h
+          category: header
+        - file: ../../../../m2003-motor/include/app_uart.h
+          category: header
+        - file: ../../../../m2003-motor/include/commutation.h
+          category: header
+        - file: ../../../../m2003-motor/include/hall.h
+          category: header
+        - file: ../../../../m2003-motor/include/motor.h
+          category: header
+        - file: ../../../../m2003-motor/include/protocol.h
+          category: header
+  constructed-files:
+    - file: ../../../../m2003-motor/RTE/_Debug_M2003FC1AE/RTE_Components.h
+      category: header
+  licenses:
+    - license: <unknown>
+      packs:
+        - pack: Nuvoton::NuMicroM23_DFP@1.0.4
+      components:
+        - component: Nuvoton::Device:Startup@0.00.001
+    - license: Apache-2.0
+      packs:
+        - pack: ARM::CMSIS@6.3.0
+      components:
+        - component: ARM::CMSIS:CORE@6.2.0

@@ -1,0 +1,19 @@
+build-idx:
+  generated-by: csolution version 2.13.0
+  cdefault: ${CMSIS_COMPILER_ROOT}/cdefault.yml
+  csolution: m2003.csolution.yml
+  cbuild-run: out/m2003+M2003FC1AE.cbuild-run.yml
+  tmpdir: tmp
+  cprojects:
+    - cproject: m2003-motor/m2003-motor.cproject.yml
+  cbuilds:
+    - cbuild: out/m2003-motor/M2003FC1AE/Debug/m2003-motor.Debug+M2003FC1AE.cbuild.yml
+      project: m2003-motor
+      configuration: .Debug+M2003FC1AE
+      messages:
+        warnings:
+          - no compiler registered. Add path to compiler 'bin' directory with environment variable <name>_TOOLCHAIN_<major>_<minor>_<patch>. <name> is one of AC6, GCC, IAR, CLANG
+        info:
+          - m2003.cbuild-pack.yml - file is already up-to-date
+          - m2003+M2003FC1AE.cbuild-run.yml - file is already up-to-date
+          - m2003-motor.Debug+M2003FC1AE.cbuild.yml - file is already up-to-date

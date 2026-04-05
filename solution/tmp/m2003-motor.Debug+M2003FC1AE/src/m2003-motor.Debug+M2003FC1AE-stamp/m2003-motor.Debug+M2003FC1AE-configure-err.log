@@ -1,0 +1,47 @@
+CMake Error at C:/Users/mmsyl/.vcpkg/artifacts/2139c4c6/tools.kitware.cmake/3.31.5/share/cmake-3.31/Modules/CMakeTestCCompiler.cmake:67 (message):
+  The C compiler
+
+    "c:/Users/mmsyl/.vcpkg/artifacts/2139c4c6/compilers.arm.armclang/6.24.0/bin/armclang.exe"
+
+  is not able to compile a simple test program.
+
+  It fails with the following output:
+
+    Change Dir: 'C:/Users/mmsyl/Documents/Bl4818-servo/solution/tmp/1/CMakeFiles/CMakeScratch/TryCompile-xy661z'
+    
+    Run Build Command(s): C:/Users/mmsyl/.vcpkg/artifacts/2139c4c6/tools.ninja.build.ninja/1.13.2/ninja.exe -v cmTC_46752
+    [1/2] c:\Users\mmsyl\.vcpkg\artifacts\2139c4c6\compilers.arm.armclang\6.24.0\bin\armclang.exe   --target=arm-arm-none-eabi -mcpu=Cortex-M23 -mfpu=none -o CMakeFiles\cmTC_46752.dir\testCCompiler.c.obj -c C:\Users\mmsyl\Documents\Bl4818-servo\solution\tmp\1\CMakeFiles\CMakeScratch\TryCompile-xy661z\testCCompiler.c
+    FAILED: [code=1] CMakeFiles/cmTC_46752.dir/testCCompiler.c.obj 
+    c:\Users\mmsyl\.vcpkg\artifacts\2139c4c6\compilers.arm.armclang\6.24.0\bin\armclang.exe   --target=arm-arm-none-eabi -mcpu=Cortex-M23 -mfpu=none -o CMakeFiles\cmTC_46752.dir\testCCompiler.c.obj -c C:\Users\mmsyl\Documents\Bl4818-servo\solution\tmp\1\CMakeFiles\CMakeScratch\TryCompile-xy661z\testCCompiler.c
+    armclang: error: Failed to check out a license.
+    The license file could not be found. Check that ARMLMD_LICENSE_FILE is set correctly.
+    armclang: note: ARMLMD_LICENSE_FILE is not set. You must set this to the path to your license.
+    armclang: note: Information about this error is available at https://developer.arm.com/support/lic87/m1
+     General licensing information is available at https://developer.arm.com/support/licensing/
+     If you need further help, provide this complete error message to your supplier or to Arm via https://services.arm.com/support/s/contactsupport
+     - ARMLMD_LICENSE_FILE: unset
+     - LM_LICENSE_FILE: unset
+     - ARM_PRODUCT_DEF: unset
+     - ARM_PRODUCT_PATH: unset
+     - ARM_TOOL_VARIANT: unset
+     - Product location: c:\Users\mmsyl\.vcpkg\artifacts\2139c4c6\compilers.arm.armclang\6.24.0\sw\mappings
+     - Toolchain location: c:\Users\mmsyl\.vcpkg\artifacts\2139c4c6\compilers.arm.armclang\6.24.0\bin
+     - Selected tool variant: product
+    armclang: note:  - Checkout feature: compiler5
+     - Feature version: 5.0202502
+     - Flex error code: -1
+    Product: Arm Compiler for Embedded 6.24 Professional
+    Component: Arm Compiler for Embedded 6.24
+    Tool: armclang [5f371800]
+    
+    ninja: build stopped: subcommand failed.
+    
+    
+
+  
+
+  CMake will not be able to correctly generate this project.
+Call Stack (most recent call first):
+  CMakeLists.txt:27 (project)
+
+

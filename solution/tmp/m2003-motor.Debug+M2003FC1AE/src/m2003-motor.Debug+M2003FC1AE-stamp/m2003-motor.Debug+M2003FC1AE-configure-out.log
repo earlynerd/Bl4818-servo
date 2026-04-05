@@ -1,0 +1,8 @@
+-- The C compiler identification is unknown
+-- The ASM compiler identification is ARMClang
+-- Found assembler: c:/Users/mmsyl/.vcpkg/artifacts/2139c4c6/compilers.arm.armclang/6.24.0/bin/armclang.exe
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - failed
+-- Check for working C compiler: c:/Users/mmsyl/.vcpkg/artifacts/2139c4c6/compilers.arm.armclang/6.24.0/bin/armclang.exe
+-- Check for working C compiler: c:/Users/mmsyl/.vcpkg/artifacts/2139c4c6/compilers.arm.armclang/6.24.0/bin/armclang.exe - broken
+-- Configuring incomplete, errors occurred!

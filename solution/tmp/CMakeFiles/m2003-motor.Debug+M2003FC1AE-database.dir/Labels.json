@@ -1,0 +1,37 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "C:/Users/mmsyl/Documents/Bl4818-servo/solution/tmp/CMakeFiles/m2003-motor.Debug+M2003FC1AE-database"
+		},
+		{
+			"file" : "C:/Users/mmsyl/Documents/Bl4818-servo/solution/tmp/CMakeFiles/m2003-motor.Debug+M2003FC1AE-database.rule"
+		},
+		{
+			"file" : "C:/Users/mmsyl/Documents/Bl4818-servo/solution/tmp/m2003-motor.Debug+M2003FC1AE/src/m2003-motor.Debug+M2003FC1AE-stamp/m2003-motor.Debug+M2003FC1AE-database.rule"
+		},
+		{
+			"file" : "C:/Users/mmsyl/Documents/Bl4818-servo/solution/tmp/m2003-motor.Debug+M2003FC1AE/src/m2003-motor.Debug+M2003FC1AE-stamp/m2003-motor.Debug+M2003FC1AE-configure.rule"
+		},
+		{
+			"file" : "C:/Users/mmsyl/Documents/Bl4818-servo/solution/tmp/m2003-motor.Debug+M2003FC1AE/src/m2003-motor.Debug+M2003FC1AE-stamp/m2003-motor.Debug+M2003FC1AE-patch.rule"
+		},
+		{
+			"file" : "C:/Users/mmsyl/Documents/Bl4818-servo/solution/tmp/m2003-motor.Debug+M2003FC1AE/src/m2003-motor.Debug+M2003FC1AE-stamp/m2003-motor.Debug+M2003FC1AE-update.rule"
+		},
+		{
+			"file" : "C:/Users/mmsyl/Documents/Bl4818-servo/solution/tmp/m2003-motor.Debug+M2003FC1AE/src/m2003-motor.Debug+M2003FC1AE-stamp/m2003-motor.Debug+M2003FC1AE-download.rule"
+		},
+		{
+			"file" : "C:/Users/mmsyl/Documents/Bl4818-servo/solution/tmp/m2003-motor.Debug+M2003FC1AE/src/m2003-motor.Debug+M2003FC1AE-stamp/m2003-motor.Debug+M2003FC1AE-mkdir.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"m2003-motor.Debug+M2003FC1AE"
+		],
+		"name" : "m2003-motor.Debug+M2003FC1AE-database"
+	}
+}

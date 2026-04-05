@@ -1,0 +1,8 @@
+cbuild-pack:
+  resolved-packs:
+    - resolved-pack: ARM::CMSIS@6.3.0
+      selected-by-pack:
+        - ARM::CMSIS
+    - resolved-pack: Nuvoton::NuMicroM23_DFP@1.0.4
+      selected-by-pack:
+        - Nuvoton::NuMicroM23_DFP
