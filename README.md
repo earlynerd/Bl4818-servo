@@ -1,8 +1,17 @@
 ![Image of BL4818 brushless outrunner motor](resources/motor.png)
-# BL4818-Servo: Custom Firmware for BL4818 Brushless Motor Drivers
+# BL4818-Servo: MS51 Firmware for BL4818 Brushless Motor Drivers
 
 Custom open-source firmware for the inexpensive BL4818 "massage gun" / "fascia gun"
 brushless motor driver boards, turning them into low-cost servo drives.
+
+## Repo Scope
+
+This repository now tracks the **stock-MCU MS51 firmware** for BL4818 boards.
+It is the path for people who want to keep the original Nuvoton MS51FB9AE in
+place and reflash the board without desoldering or replacing the MCU.
+
+The separate **M2003 / Cortex-M23 closed-loop servo firmware** has been split
+into its own repository: `bl4818-servo-M23`.
 
 ## Motivation
 
@@ -23,7 +32,7 @@ The stock firmware has several limitations that prevent use as a servo:
 3. **Low Acceleration** 
 4. **No serial interface** — no way to command position/velocity/torque targets
 
-This project is a minimal rewrite to fix these issues.
+This project is a minimal rewrite for the stock MS51 hardware to fix these issues.
 
 ## Hardware
 
